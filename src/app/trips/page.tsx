@@ -13,10 +13,7 @@ export default async function TripsPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Your trips</h1>
-        <a
-          href="/trips/new"
-          className="rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700"
-        >
+        <a href="/trips/new" className="btn-primary">
           New trip
         </a>
       </div>

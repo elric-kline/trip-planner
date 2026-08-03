@@ -42,10 +42,7 @@ export default async function NewTripPage({
             className="input"
           />
         </Field>
-        <button
-          type="submit"
-          className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700"
-        >
+        <button type="submit" className="btn-primary w-full">
           Create trip
         </button>
       </form>

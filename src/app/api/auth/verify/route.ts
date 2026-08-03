@@ -11,13 +11,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const user = await redeemLoginToken(token);
-  if (!user) {
+  const result = await redeemLoginToken(token);
+  if (!result) {
     return NextResponse.redirect(
       new URL(
         `/login?error=${encodeURIComponent("That sign-in link is invalid or has expired.")}`,
         request.url,
       ),
+    );
+  }
+
+  if (result.needsPassword) {
+    return NextResponse.redirect(
+      new URL(`/login/set-password?next=${encodeURIComponent(next)}`, request.url),
     );
   }
 

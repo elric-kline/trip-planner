@@ -1,4 +1,4 @@
-import { requestMagicLink } from "./actions.ts";
+import { requestMagicLink, passwordLogin } from "./actions.ts";
 import { emailDeliveryConfigured } from "@/lib/email.ts";
 
 export default async function LoginPage({
@@ -30,11 +30,29 @@ export default async function LoginPage({
           placeholder="you@example.com"
           className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none"
         />
-        <button
-          type="submit"
-          className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700"
-        >
+        <button type="submit" className="btn-primary w-full">
           Send sign-in link
+        </button>
+      </form>
+
+      <div className="my-6 flex items-center gap-3 text-xs text-stone-400">
+        <div className="h-px flex-1 bg-stone-200" />
+        or, if you've set one
+        <div className="h-px flex-1 bg-stone-200" />
+      </div>
+
+      <form action={passwordLogin} className="space-y-3">
+        <input type="hidden" name="next" value={next ?? "/trips"} />
+        <input
+          type="email"
+          name="email"
+          required
+          placeholder="you@example.com"
+          className="input"
+        />
+        <input type="password" name="password" required placeholder="Password" className="input" />
+        <button type="submit" className="btn-secondary w-full">
+          Sign in with password
         </button>
       </form>
     </div>

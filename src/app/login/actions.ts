@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createLoginToken } from "@/lib/auth.ts";
+import type { Route } from "next";
+import { createLoginToken, verifyPasswordLogin } from "@/lib/auth.ts";
 import { sendMagicLink } from "@/lib/email.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 
@@ -19,4 +20,22 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
   await sendMagicLink(email, url);
 
   redirect(`/login/check-email?email=${encodeURIComponent(email)}`);
+}
+
+export async function passwordLogin(formData: FormData): Promise<void> {
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "") || "/trips";
+
+  const user = email && password ? await verifyPasswordLogin(email, password) : null;
+  if (!user) {
+    redirect(
+      `/login?error=${encodeURIComponent("Wrong email or password.")}&next=${encodeURIComponent(next)}`,
+    );
+  }
+
+  // `next` comes from a query param, not a route the app declares statically,
+  // so typedRoutes can't verify it — this is Next's documented escape hatch
+  // for exactly that case.
+  redirect(next as Route);
 }
