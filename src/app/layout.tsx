@@ -3,8 +3,12 @@ import "./globals.css";
 import { getCurrentUser, signOut } from "@/lib/auth.ts";
 
 export const metadata: Metadata = {
-  title: "Trip Planner",
-  description: "Plan a group trip together, then keep it as a shared journal.",
+  title: {
+    default: "AgreeMobile",
+    template: "%s · AgreeMobile",
+  },
+  description:
+    "Align on where you're going and what you're doing, then keep the trip as a shared journal.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -15,8 +19,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen">
         <header className="border-b border-stone-200 bg-white">
           <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-            <a href="/trips" className="font-semibold tracking-tight">
-              Trip Planner
+            <a href="/trips" className="text-lg font-semibold tracking-tight">
+              <span className="text-teal-700">Agree</span>
+              <span className="text-stone-900">Mobile</span>
             </a>
             {user ? (
               <form

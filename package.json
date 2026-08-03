@@ -1,5 +1,5 @@
 {
-  "name": "trip-planner",
+  "name": "agreemobile",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,10 +9,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "npm run db:migrate && next start",
+    "start": "npm run db:migrate && npm run db:seed && next start",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types src/db/migrate.ts",
+    "db:seed": "node --experimental-strip-types src/db/seed.ts",
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'"
   },
   "dependencies": {

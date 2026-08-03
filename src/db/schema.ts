@@ -7,6 +7,7 @@ import {
   doublePrecision,
   index,
   pgEnum,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -50,6 +51,17 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
   name: text("name"),
+  /**
+   * Null until the user sets one. Magic-link sign-in works either way; a null
+   * hash is also the signal that first verification should prompt the user to
+   * create a password (see lib/auth.ts's redeemLoginToken).
+   */
+  passwordHash: text("password_hash"),
+  /**
+   * No admin surface exists yet — this only marks who a future one should
+   * trust. Seeded directly (see db/seed.ts), not settable via the app.
+   */
+  isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
