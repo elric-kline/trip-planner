@@ -1,0 +1,103 @@
+import { randomBytes } from "node:crypto";
+import { cookies } from "next/headers";
+import { and, eq, gt, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { loginTokens, sessions, users } from "@/db/schema";
+
+const SESSION_COOKIE = "trip_session";
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LOGIN_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+export type CurrentUser = { id: string; email: string; name: string | null };
+
+const newToken = () => randomBytes(32).toString("base64url");
+
+/**
+ * Issues a single-use magic-link token. Returns the token so the caller can
+ * build an absolute URL — it needs the request's origin, which we don't have here.
+ */
+export async function createLoginToken(email: string): Promise<string> {
+  const token = newToken();
+  await db.insert(loginTokens).values({
+    token,
+    email: email.trim().toLowerCase(),
+    expiresAt: new Date(Date.now() + LOGIN_TOKEN_TTL_MS),
+  });
+  return token;
+}
+
+/**
+ * Redeems a login token and starts a session, creating the user on first use.
+ * Returns null when the token is unknown, expired, or already spent.
+ */
+export async function redeemLoginToken(token: string): Promise<CurrentUser | null> {
+  const [row] = await db
+    .select()
+    .from(loginTokens)
+    .where(
+      and(
+        eq(loginTokens.token, token),
+        isNull(loginTokens.usedAt),
+        gt(loginTokens.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+
+  await db
+    .update(loginTokens)
+    .set({ usedAt: new Date() })
+    .where(eq(loginTokens.token, token));
+
+  let [user] = await db.select().from(users).where(eq(users.email, row.email)).limit(1);
+  if (!user) {
+    [user] = await db.insert(users).values({ email: row.email }).returning();
+  }
+
+  await startSession(user.id);
+  return { id: user.id, email: user.email, name: user.name };
+}
+
+export async function startSession(userId: string): Promise<void> {
+  const token = newToken();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await db.insert(sessions).values({ token, userId, expiresAt });
+
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    expires: expiresAt,
+  });
+}
+
+export async function signOut(): Promise<void> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (token) await db.delete(sessions).where(eq(sessions.token, token));
+  jar.delete(SESSION_COOKIE);
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+
+  const [row] = await db
+    .select({ id: users.id, email: users.email, name: users.name })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .where(and(eq(sessions.token, token), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+
+  return row ?? null;
+}
+
+/** For routes that have no meaning without a signed-in viewer. */
+export async function requireUser(): Promise<CurrentUser> {
+  const user = await getCurrentUser();
+  if (!user) throw new Error("UNAUTHENTICATED");
+  return user;
+}
