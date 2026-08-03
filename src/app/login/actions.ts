@@ -17,7 +17,14 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
   const origin = await absoluteOrigin();
   const url = `${origin}/api/auth/verify?token=${token}&next=${encodeURIComponent(next)}`;
 
-  await sendMagicLink(email, url);
+  try {
+    await sendMagicLink(email, url);
+  } catch (err) {
+    console.error("[login] failed to send magic link:", err);
+    redirect(
+      `/login?error=${encodeURIComponent("Couldn't send the sign-in email — try again in a moment.")}&next=${encodeURIComponent(next)}`,
+    );
+  }
 
   redirect(`/login/check-email?email=${encodeURIComponent(email)}`);
 }
