@@ -1,0 +1,9 @@
+# Forces the exact Node major version rather than relying on Nixpacks to infer
+# one from package.json's `engines` field. Two things in this app need it:
+#   - @tailwindcss/oxide (a @tailwindcss/postcss dependency) ships a native
+#     binding and requires Node >= 20; under Node 18 the build fails with
+#     "Cannot find native binding."
+#   - src/db/migrate.ts uses `node --experimental-strip-types`, which needs
+#     Node >= 22.6 — so 20 isn't actually enough either.
+[phases.setup]
+nixPkgs = ["nodejs_22"]
