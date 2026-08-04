@@ -14,7 +14,7 @@ test("with no provider configured, logs instead of sending", async (t) => {
   });
 
   assert.equal(emailDeliveryConfigured(), false);
-  await sendMagicLink("someone@example.com", "https://example.com/api/auth/verify?token=abc");
+  await sendMagicLink("someone@example.com", "https://example.com/login/confirm?token=abc");
   assert.equal(fetchMock.mock.calls.length, 0);
 });
 
@@ -26,7 +26,7 @@ test("with only one of the two env vars set, still falls back to console", async
   });
 
   assert.equal(emailDeliveryConfigured(), false);
-  await sendMagicLink("someone@example.com", "https://example.com/api/auth/verify?token=abc");
+  await sendMagicLink("someone@example.com", "https://example.com/login/confirm?token=abc");
   assert.equal(fetchMock.mock.calls.length, 0);
   clearEnv();
 });
@@ -42,7 +42,7 @@ test("with both env vars set, posts to the Resend API with the right shape", asy
   );
 
   assert.equal(emailDeliveryConfigured(), true);
-  await sendMagicLink("someone@example.com", "https://example.com/api/auth/verify?token=abc");
+  await sendMagicLink("someone@example.com", "https://example.com/login/confirm?token=abc");
 
   assert.equal(fetchMock.mock.calls.length, 1);
   const [url, init] = fetchMock.mock.calls[0].arguments as [string, RequestInit];
@@ -52,8 +52,8 @@ test("with both env vars set, posts to the Resend API with the right shape", asy
   const body = JSON.parse(init.body as string);
   assert.equal(body.from, "AgreeMobile <sign-in@agreemobile.com>");
   assert.equal(body.to, "someone@example.com");
-  assert.match(body.html, /https:\/\/example\.com\/api\/auth\/verify\?token=abc/);
-  assert.match(body.text, /https:\/\/example\.com\/api\/auth\/verify\?token=abc/);
+  assert.match(body.html, /https:\/\/example\.com\/login\/confirm\?token=abc/);
+  assert.match(body.text, /https:\/\/example\.com\/login\/confirm\?token=abc/);
 
   clearEnv();
 });
@@ -69,7 +69,7 @@ test("a non-ok response from Resend throws rather than silently dropping the ema
   );
 
   await assert.rejects(
-    () => sendMagicLink("someone@example.com", "https://example.com/api/auth/verify?token=abc"),
+    () => sendMagicLink("someone@example.com", "https://example.com/login/confirm?token=abc"),
     /Resend API error \(422\)/,
   );
 
