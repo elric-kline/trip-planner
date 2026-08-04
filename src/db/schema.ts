@@ -214,3 +214,42 @@ export const itemRsvps = pgTable(
     index("item_rsvps_user_idx").on(t.userId),
   ],
 );
+
+export const lodgingPaymentStatus = pgEnum("lodging_payment_status", [
+  "prepaid",
+  "partial",
+  "pay_on_arrival",
+]);
+
+/**
+ * Category-specific fields for a lodging item, one row per item. A dedicated
+ * table rather than nullable columns on `items` itself — keeps the base
+ * table from bloating with fields only one category uses, and is the
+ * pattern to repeat (dining_details, transport_details, ...) rather than a
+ * generic polymorphic blob nobody's asked for yet.
+ *
+ * Check-in/check-out aren't columns here — they're the item's own
+ * `startsAt`/`endsAt`, so a lodging stay slots into the conflict engine and
+ * timeline like any other locked item, for free.
+ */
+export const lodgingDetails = pgTable("lodging_details", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => items.id, { onDelete: "cascade" }),
+  address: text("address"),
+  checkInInstructions: text("check_in_instructions"),
+  contactName: text("contact_name"),
+  contactPhone: text("contact_phone"),
+  contactEmail: text("contact_email"),
+  confirmationNumber: text("confirmation_number"),
+  /** Must be a member of the trip — enforced in lib/lodging.ts, not here. */
+  bookedBy: uuid("booked_by").references(() => users.id),
+  paymentStatus: lodgingPaymentStatus("payment_status"),
+  bookingUrl: text("booking_url"),
+  cancellationDeadline: timestamp("cancellation_deadline", { withTimezone: true }),
+  costAmount: doublePrecision("cost_amount"),
+  /** ISO 4217, e.g. "USD" — free text, not validated against a currency list. */
+  costCurrency: text("cost_currency"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

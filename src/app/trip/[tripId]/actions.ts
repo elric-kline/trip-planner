@@ -18,6 +18,7 @@ import {
   updateItemDetails,
   RuleError,
 } from "@/lib/items.ts";
+import { upsertLodgingDetails, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import { zonedInputToUtc } from "@/lib/time.ts";
 
@@ -210,6 +211,38 @@ export async function updateItemAction(
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+export async function updateLodgingDetailsAction(
+  tripId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+
+  const str = (name: string) => String(formData.get(name) ?? "").trim() || null;
+  const paymentStatus = (formData.get("paymentStatus") as LodgingPaymentStatus | "") || null;
+
+  try {
+    await upsertLodgingDetails(access, itemId, {
+      address: str("address"),
+      checkInInstructions: str("checkInInstructions"),
+      contactName: str("contactName"),
+      contactPhone: str("contactPhone"),
+      contactEmail: str("contactEmail"),
+      confirmationNumber: str("confirmationNumber"),
+      bookedBy: str("bookedBy"),
+      paymentStatus,
+      bookingUrl: str("bookingUrl"),
+      cancellationDeadline: localInputToDate(formData.get("cancellationDeadline"), access.trip.timezone),
+      costAmount: toNumberOrNull(formData.get("costAmount")),
+      costCurrency: str("costCurrency"),
+    });
+  } catch (err) {
+    withError(tripId, err);
+  }
   revalidatePath(`/trip/${tripId}/items/${itemId}`);
 }
 

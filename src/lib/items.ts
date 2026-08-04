@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { itemRsvps, items } from "@/db/schema";
+import { itemRsvps, items, lodgingDetails } from "@/db/schema";
 import {
   checkDecline,
   checkLock,
@@ -105,6 +105,12 @@ export async function updateItemDetails(
     })
     .where(eq(items.id, itemId))
     .returning();
+
+  // Lodging details only make sense for a lodging item -- if the category
+  // just moved away from it, whatever was there is now orphaned.
+  if (patch.category && patch.category !== "lodging") {
+    await db.delete(lodgingDetails).where(eq(lodgingDetails.itemId, itemId));
+  }
 
   return updated;
 }
