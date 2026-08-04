@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { loginTokens, sessions, users } from "@/db/schema";
+import { hashPassword, verifyPasswordHash, MIN_PASSWORD_LENGTH } from "./password.ts";
 
 const SESSION_COOKIE = "trip_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -11,6 +12,32 @@ const LOGIN_TOKEN_TTL_MS = 15 * 60 * 1000;
 export type CurrentUser = { id: string; email: string; name: string | null };
 
 const newToken = () => randomBytes(32).toString("base64url");
+
+/** Sets or replaces the user's password. Used for first-time setup and later changes alike. */
+export async function setPassword(userId: string, password: string): Promise<void> {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  }
+  const passwordHash = await hashPassword(password);
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+}
+
+/** Null on any failure — unknown email, no password set yet, or a wrong one. */
+export async function verifyPasswordLogin(
+  email: string,
+  password: string,
+): Promise<CurrentUser | null> {
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+    .limit(1);
+  if (!user?.passwordHash) return null;
+  if (!(await verifyPasswordHash(password, user.passwordHash))) return null;
+
+  await startSession(user.id);
+  return { id: user.id, email: user.email, name: user.name };
+}
 
 /**
  * Issues a single-use magic-link token. Returns the token so the caller can
@@ -26,11 +53,17 @@ export async function createLoginToken(email: string): Promise<string> {
   return token;
 }
 
+export type RedeemedLogin = { user: CurrentUser; needsPassword: boolean };
+
 /**
  * Redeems a login token and starts a session, creating the user on first use.
  * Returns null when the token is unknown, expired, or already spent.
+ *
+ * `needsPassword` is true when the account has never had one set — the caller
+ * uses this to route a first-time verify to the "create a password" step
+ * instead of straight into the app.
  */
-export async function redeemLoginToken(token: string): Promise<CurrentUser | null> {
+export async function redeemLoginToken(token: string): Promise<RedeemedLogin | null> {
   const [row] = await db
     .select()
     .from(loginTokens)
@@ -55,7 +88,10 @@ export async function redeemLoginToken(token: string): Promise<CurrentUser | nul
   }
 
   await startSession(user.id);
-  return { id: user.id, email: user.email, name: user.name };
+  return {
+    user: { id: user.id, email: user.email, name: user.name },
+    needsPassword: user.passwordHash === null,
+  };
 }
 
 export async function startSession(userId: string): Promise<void> {

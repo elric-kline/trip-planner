@@ -12,8 +12,12 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "AgreeMobile",
-  description: "Get your friends aligned on the trip itinerary, one stop at a time.",
+  title: {
+    default: "AgreeMobile",
+    template: "%s · AgreeMobile",
+  },
+  description:
+    "Align on where you're going and what you're doing, then keep the trip as a shared journal.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
