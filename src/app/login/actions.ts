@@ -15,7 +15,7 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
 
   const token = await createLoginToken(email);
   const origin = await absoluteOrigin();
-  const url = `${origin}/api/auth/verify?token=${token}&next=${encodeURIComponent(next)}`;
+  const url = `${origin}/login/confirm?token=${token}&next=${encodeURIComponent(next)}`;
 
   try {
     await sendMagicLink(email, url);
