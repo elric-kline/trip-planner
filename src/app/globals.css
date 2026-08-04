@@ -1,7 +1,46 @@
 @import "tailwindcss";
 
+@theme {
+  /* Route — warm terracotta, the "agree" accent. Primary actions, the logomark, links. */
+  --color-route-50: #fdf3ef;
+  --color-route-100: #fbe4da;
+  --color-route-200: #f5c7b0;
+  --color-route-300: #eea37e;
+  --color-route-400: #e67d52;
+  --color-route-500: #d9603d;
+  --color-route-600: #c24a2a;
+  --color-route-700: #a13a21;
+  --color-route-800: #7f2f1d;
+  --color-route-900: #5f2417;
+
+  /* Pine — deep teal ink. Headings and quiet emphasis. */
+  --color-pine-50: #eef4f2;
+  --color-pine-100: #d6e5e1;
+  --color-pine-200: #aecbc4;
+  --color-pine-300: #7faca2;
+  --color-pine-400: #4c8175;
+  --color-pine-500: #2f5d52;
+  --color-pine-600: #24473f;
+  --color-pine-700: #1f3d3a;
+  --color-pine-800: #172e2b;
+  --color-pine-900: #10201e;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+}
+
 body {
   @apply bg-stone-50 text-stone-900;
+  font-family: var(--font-sans);
+}
+
+@layer base {
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
 }
 
 .badge {
@@ -9,13 +48,29 @@ body {
 }
 
 .input {
-  @apply w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none;
+  @apply w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-route-500 focus:outline-none;
 }
 
 .btn-primary {
-  @apply rounded-md bg-stone-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50;
+  @apply rounded-md bg-route-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-route-700 disabled:opacity-50;
 }
 
 .btn-secondary {
   @apply rounded-md border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50;
+}
+
+.link {
+  @apply text-route-600 underline decoration-route-200 underline-offset-2 hover:text-route-700 hover:decoration-route-400;
+}
+
+/* A dashed "road" rule — a small nod to the automobile half of the name. */
+.road-rule {
+  height: 2px;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-route-300) 0,
+    var(--color-route-300) 8px,
+    transparent 8px,
+    transparent 16px
+  );
 }

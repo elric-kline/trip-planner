@@ -30,10 +30,7 @@ export default async function LoginPage({
           placeholder="you@example.com"
           className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none"
         />
-        <button
-          type="submit"
-          className="w-full rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white hover:bg-stone-700"
-        >
+        <button type="submit" className="btn-primary w-full py-2">
           Send sign-in link
         </button>
       </form>
