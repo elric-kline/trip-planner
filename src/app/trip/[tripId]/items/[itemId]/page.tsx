@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, canEditItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
 import { checkRsvp, checkUnlock } from "@/lib/lifecycle.ts";
+import { getLodgingDetails } from "@/lib/lodging.ts";
 import {
   declineItemAction,
   deleteItemAction,
@@ -13,9 +14,16 @@ import {
   unlockItemAction,
   unscheduleItemAction,
   updateItemAction,
+  updateLodgingDetailsAction,
 } from "../../actions.ts";
 import { canLockItem } from "@/lib/scope.ts";
 import { utcToZonedInputValue } from "@/lib/time.ts";
+
+const PAYMENT_STATUS_LABEL = {
+  prepaid: "Prepaid",
+  partial: "Partially paid",
+  pay_on_arrival: "Pay on arrival",
+} as const;
 
 export default async function ItemPage({
   params,
@@ -39,6 +47,12 @@ export default async function ItemPage({
   const attendance = await attendanceFor(access, item);
   const myResponse = item.status === "locked" && item.commitment === "optional" ? await myRsvp(access, itemId) : null;
   const editable = canEditItem(access, item);
+  const lodging = item.category === "lodging" ? await getLodgingDetails(itemId) : null;
+  // Booking details are the thing that gets corrected after an item locks
+  // (a late confirmation number, a fixed check-in code) — gated on the same
+  // rule as the item itself, not the page's extra "not locked" restriction
+  // the base title/notes edit form imposes below.
+  const lodgingEditable = item.category === "lodging" && editable;
   const rsvpAllowed = checkRsvp(item).ok;
   const unlockAllowed = checkUnlock(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
 
@@ -60,6 +74,171 @@ export default async function ItemPage({
         {item.locationName && <p className="text-sm text-stone-500">{item.locationName}</p>}
         {item.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-stone-700">{item.notes}</p>}
       </div>
+
+      {item.category === "lodging" && (lodging || lodgingEditable) && (
+        <section className="rounded-md border border-stone-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-stone-700">Lodging details</h2>
+
+          {lodgingEditable ? (
+            <form
+              action={updateLodgingDetailsAction.bind(null, tripId, itemId)}
+              className="grid gap-3"
+            >
+              <input
+                name="address"
+                defaultValue={lodging?.address ?? ""}
+                placeholder="Address"
+                className="input"
+              />
+              <textarea
+                name="checkInInstructions"
+                defaultValue={lodging?.checkInInstructions ?? ""}
+                placeholder="Check-in instructions (e.g. lockbox code, self check-in)"
+                className="input"
+                rows={2}
+              />
+              <div className="grid grid-cols-3 gap-3">
+                <input
+                  name="contactName"
+                  defaultValue={lodging?.contactName ?? ""}
+                  placeholder="Contact name (optional)"
+                  className="input"
+                />
+                <input
+                  name="contactPhone"
+                  defaultValue={lodging?.contactPhone ?? ""}
+                  placeholder="Contact phone"
+                  className="input"
+                />
+                <input
+                  name="contactEmail"
+                  type="email"
+                  defaultValue={lodging?.contactEmail ?? ""}
+                  placeholder="Contact email"
+                  className="input"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  name="confirmationNumber"
+                  defaultValue={lodging?.confirmationNumber ?? ""}
+                  placeholder="Confirmation number"
+                  className="input"
+                />
+                <select name="bookedBy" defaultValue={lodging?.bookedBy ?? ""} className="input">
+                  <option value="">Booked under (optional)</option>
+                  {access.members.map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.name ?? m.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <select
+                  name="paymentStatus"
+                  defaultValue={lodging?.paymentStatus ?? ""}
+                  className="input"
+                >
+                  <option value="">Payment status</option>
+                  <option value="prepaid">Prepaid</option>
+                  <option value="partial">Partially paid</option>
+                  <option value="pay_on_arrival">Pay on arrival</option>
+                </select>
+                <input
+                  name="costAmount"
+                  type="number"
+                  step="any"
+                  defaultValue={lodging?.costAmount ?? ""}
+                  placeholder="Cost"
+                  className="input"
+                />
+                <input
+                  name="costCurrency"
+                  defaultValue={lodging?.costCurrency ?? ""}
+                  placeholder="USD"
+                  className="input"
+                  maxLength={8}
+                />
+              </div>
+              <label className="text-sm">
+                <span className="mb-1 block text-stone-700">Cancel by (optional)</span>
+                <input
+                  type="datetime-local"
+                  name="cancellationDeadline"
+                  defaultValue={
+                    lodging?.cancellationDeadline
+                      ? utcToZonedInputValue(lodging.cancellationDeadline, access.trip.timezone)
+                      : ""
+                  }
+                  className="input"
+                />
+              </label>
+              <input
+                name="bookingUrl"
+                type="url"
+                defaultValue={lodging?.bookingUrl ?? ""}
+                placeholder="Booking link (optional)"
+                className="input"
+              />
+              <button className="btn-secondary justify-self-start">Save lodging details</button>
+            </form>
+          ) : (
+            lodging && (
+              <dl className="space-y-1.5 text-sm text-stone-700">
+                {lodging.address && (
+                  <Field label="Address">{lodging.address}</Field>
+                )}
+                {lodging.checkInInstructions && (
+                  <Field label="Check-in instructions">
+                    <span className="whitespace-pre-wrap">{lodging.checkInInstructions}</span>
+                  </Field>
+                )}
+                {(lodging.contactName || lodging.contactPhone || lodging.contactEmail) && (
+                  <Field label="Contact">
+                    {[lodging.contactName, lodging.contactPhone, lodging.contactEmail]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </Field>
+                )}
+                {lodging.confirmationNumber && (
+                  <Field label="Confirmation #">{lodging.confirmationNumber}</Field>
+                )}
+                {lodging.bookedBy && (
+                  <Field label="Booked under">
+                    {access.members.find((m) => m.userId === lodging.bookedBy)?.name ??
+                      access.members.find((m) => m.userId === lodging.bookedBy)?.email ??
+                      "—"}
+                  </Field>
+                )}
+                {(lodging.paymentStatus || lodging.costAmount != null) && (
+                  <Field label="Payment">
+                    {lodging.paymentStatus ? PAYMENT_STATUS_LABEL[lodging.paymentStatus] : ""}
+                    {lodging.costAmount != null &&
+                      ` — ${lodging.costAmount} ${lodging.costCurrency ?? ""}`.trim()}
+                  </Field>
+                )}
+                {lodging.cancellationDeadline && (
+                  <Field label="Cancel by">
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: access.trip.timezone,
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(lodging.cancellationDeadline)}
+                  </Field>
+                )}
+                {lodging.bookingUrl && (
+                  <Field label="Booking link">
+                    <a href={lodging.bookingUrl} className="text-teal-700 underline break-all">
+                      {lodging.bookingUrl}
+                    </a>
+                  </Field>
+                )}
+              </dl>
+            )
+          )}
+        </section>
+      )}
 
       {item.status === "locked" && (
         <section className="rounded-md border border-stone-200 bg-white p-4">
@@ -108,10 +287,14 @@ export default async function ItemPage({
 
       {item.status !== "locked" && item.status !== "declined" && (
         <section className="rounded-md border border-stone-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-semibold text-stone-700">Schedule</h2>
+          <h2 className="mb-2 text-sm font-semibold text-stone-700">
+            {item.category === "lodging" ? "Check-in / check-out" : "Schedule"}
+          </h2>
           <form action={scheduleItemAction.bind(null, tripId, itemId)} className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
-              <span className="mb-1 block text-stone-700">Starts</span>
+              <span className="mb-1 block text-stone-700">
+                {item.category === "lodging" ? "Check-in" : "Starts"}
+              </span>
               <input
                 type="datetime-local"
                 name="startsAt"
@@ -121,7 +304,9 @@ export default async function ItemPage({
               />
             </label>
             <label className="text-sm">
-              <span className="mb-1 block text-stone-700">Ends (optional)</span>
+              <span className="mb-1 block text-stone-700">
+                {item.category === "lodging" ? "Check-out (optional)" : "Ends (optional)"}
+              </span>
               <input
                 type="datetime-local"
                 name="endsAt"
@@ -214,4 +399,13 @@ export default async function ItemPage({
       </section>
     </div>
   );
+
+  function Field({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+      <div className="flex gap-2">
+        <dt className="w-36 shrink-0 text-stone-400">{label}</dt>
+        <dd>{children}</dd>
+      </div>
+    );
+  }
 }
