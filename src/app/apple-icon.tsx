@@ -15,14 +15,24 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#0f766e",
-          color: "white",
-          fontSize: 104,
-          fontWeight: 700,
-          fontFamily: "sans-serif",
+          background: "#c24a2a",
         }}
       >
-        A
+        {/* The AgreeMobile mark: a map pin with a checkmark — a stop, agreed on. */}
+        <svg width="112" height="112" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path
+            d="M12 2C7.58 2 4 5.58 4 10c0 5.25 6.72 11.19 7.31 11.71a1 1 0 0 0 1.38 0C13.28 21.19 20 15.25 20 10c0-4.42-3.58-8-8-8Z"
+            fill="#ffffff"
+          />
+          <path
+            d="M8.5 10.4 10.8 12.7 15.1 8.1"
+            stroke="#c24a2a"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </svg>
       </div>
     ),
     { ...size },
