@@ -18,7 +18,7 @@ import {
   updateItemDetails,
   RuleError,
 } from "@/lib/items.ts";
-import { upsertLodgingDetails, type LodgingPaymentStatus } from "@/lib/lodging.ts";
+import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import { zonedInputToUtc } from "@/lib/time.ts";
 
@@ -47,15 +47,39 @@ function withError(tripId: string, err: unknown): never {
   redirect(`/trip/${tripId}?error=${encodeURIComponent(message)}`);
 }
 
+/**
+ * Shared by the quick "Add something" form (fields shown inline as soon as
+ * Lodging is picked, before the item exists) and the item detail page's
+ * lodging edit form — same field names, same parsing either way.
+ */
+function parseLodgingFields(formData: FormData, timeZone: string): LodgingDetailsInput {
+  const str = (name: string) => String(formData.get(name) ?? "").trim() || null;
+  return {
+    address: str("address"),
+    checkInInstructions: str("checkInInstructions"),
+    contactName: str("contactName"),
+    contactPhone: str("contactPhone"),
+    contactEmail: str("contactEmail"),
+    confirmationNumber: str("confirmationNumber"),
+    bookedBy: str("bookedBy"),
+    paymentStatus: (formData.get("paymentStatus") as LodgingPaymentStatus | "") || null,
+    bookingUrl: str("bookingUrl"),
+    cancellationDeadline: localInputToDate(formData.get("cancellationDeadline"), timeZone),
+    costAmount: toNumberOrNull(formData.get("costAmount")),
+    costCurrency: str("costCurrency"),
+  };
+}
+
 export async function createItemAction(tripId: string, formData: FormData): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
+  const category = (formData.get("category") as Item["category"] | "") || "activity";
 
   try {
-    await createItem(access, {
+    const created = await createItem(access, {
       title: String(formData.get("title") ?? ""),
       notes: String(formData.get("notes") ?? "") || null,
-      category: (formData.get("category") as Item["category"] | "") || "activity",
+      category,
       locationName: String(formData.get("locationName") ?? "") || null,
       locationLat: toNumberOrNull(formData.get("locationLat")),
       locationLng: toNumberOrNull(formData.get("locationLng")),
@@ -63,6 +87,13 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
       startsAt: localInputToDate(formData.get("startsAt"), access.trip.timezone),
       endsAt: localInputToDate(formData.get("endsAt"), access.trip.timezone),
     });
+
+    if (category === "lodging") {
+      const lodging = parseLodgingFields(formData, access.trip.timezone);
+      if (Object.values(lodging).some((v) => v !== null)) {
+        await upsertLodgingDetails(access, created.id, lodging);
+      }
+    }
   } catch (err) {
     withError(tripId, err);
   }
@@ -222,24 +253,8 @@ export async function updateLodgingDetailsAction(
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
 
-  const str = (name: string) => String(formData.get(name) ?? "").trim() || null;
-  const paymentStatus = (formData.get("paymentStatus") as LodgingPaymentStatus | "") || null;
-
   try {
-    await upsertLodgingDetails(access, itemId, {
-      address: str("address"),
-      checkInInstructions: str("checkInInstructions"),
-      contactName: str("contactName"),
-      contactPhone: str("contactPhone"),
-      contactEmail: str("contactEmail"),
-      confirmationNumber: str("confirmationNumber"),
-      bookedBy: str("bookedBy"),
-      paymentStatus,
-      bookingUrl: str("bookingUrl"),
-      cancellationDeadline: localInputToDate(formData.get("cancellationDeadline"), access.trip.timezone),
-      costAmount: toNumberOrNull(formData.get("costAmount")),
-      costCurrency: str("costCurrency"),
-    });
+    await upsertLodgingDetails(access, itemId, parseLodgingFields(formData, access.trip.timezone));
   } catch (err) {
     withError(tripId, err);
   }
