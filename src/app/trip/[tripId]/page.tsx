@@ -6,6 +6,7 @@ import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { flagged } from "@/lib/conflicts.ts";
 import { createInviteAction, createItemAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
+import { formatTripDateRange } from "@/lib/time.ts";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";
@@ -72,7 +73,7 @@ export default async function TripPage({
           {access.isPlanner && <span className="badge bg-amber-100 text-amber-800">Planner</span>}
         </div>
         <p className="text-sm text-stone-500">
-          {access.trip.destination} · {access.trip.startDate} – {access.trip.endDate}
+          {access.trip.destination} · {formatTripDateRange(access.trip.startDate, access.trip.endDate)}
         </p>
       </div>
 

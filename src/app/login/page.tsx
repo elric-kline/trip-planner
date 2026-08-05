@@ -28,7 +28,7 @@ export default async function LoginPage({
           name="email"
           required
           placeholder="you@example.com"
-          className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none"
+          className="input"
         />
         <button type="submit" className="btn-primary w-full">
           Send sign-in link
