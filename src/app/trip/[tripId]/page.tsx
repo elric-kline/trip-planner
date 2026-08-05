@@ -4,8 +4,9 @@ import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scop
 import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { flagged } from "@/lib/conflicts.ts";
-import { createInviteAction, createItemAction } from "./actions.ts";
+import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
+import AddItemForm from "./AddItemForm.tsx";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";
@@ -136,55 +137,7 @@ export default async function TripPage({
       )}
 
       <Section title="Add something">
-        <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <input name="title" required placeholder="Title" className="input col-span-2" />
-            <select name="category" className="input" defaultValue="activity">
-              <option value="lodging">Lodging</option>
-              <option value="dining">Dining</option>
-              <option value="activity">Activity</option>
-              <option value="transport">Transport</option>
-              <option value="other">Other</option>
-            </select>
-            <input name="locationName" placeholder="Location (optional)" className="input" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              name="locationLat"
-              type="number"
-              step="any"
-              placeholder="Latitude (optional)"
-              className="input"
-            />
-            <input
-              name="locationLng"
-              type="number"
-              step="any"
-              placeholder="Longitude (optional)"
-              className="input"
-            />
-          </div>
-          <p className="text-xs text-stone-400">
-            Coordinates are what let the conflict checker estimate travel time between stops.
-          </p>
-          <textarea name="notes" placeholder="Notes (optional)" className="input" rows={2} />
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm">
-              <span className="mb-1 block text-stone-700">Starts (optional)</span>
-              <input type="datetime-local" name="startsAt" className="input" />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-stone-700">Ends (optional)</span>
-              <input type="datetime-local" name="endsAt" className="input" />
-            </label>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-stone-600">
-            <input type="checkbox" name="private" /> Keep this private to me
-          </label>
-          <button type="submit" className="btn-primary justify-self-start">
-            Add
-          </button>
-        </form>
+        <AddItemForm tripId={tripId} members={access.members} />
       </Section>
 
       <Section title="People">
