@@ -41,12 +41,8 @@ export default function AddItemForm({
         </select>
         <input name="locationName" placeholder="Location (optional)" className="input" />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input name="locationLat" type="number" step="any" placeholder="Latitude (optional)" className="input" />
-        <input name="locationLng" type="number" step="any" placeholder="Longitude (optional)" className="input" />
-      </div>
       <p className="text-xs text-stone-400">
-        Coordinates are what let the conflict checker estimate travel time between stops.
+        We'll look up coordinates from the location automatically — that's what lets the conflict checker estimate travel time between stops.
       </p>
       <textarea name="notes" placeholder="Notes (optional)" className="input" rows={2} />
 
@@ -54,6 +50,7 @@ export default function AddItemForm({
         <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
           <p className="text-xs font-medium text-stone-500">Lodging details (optional — fill in now or later)</p>
           <input name="address" placeholder="Address" className="input" />
+          <p className="-mt-2 text-xs text-stone-400">Used for both the map and travel-time conflict checks.</p>
           <textarea
             name="checkInInstructions"
             placeholder="Check-in instructions (e.g. lockbox code, self check-in)"

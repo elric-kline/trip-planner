@@ -19,6 +19,7 @@ import {
   RuleError,
 } from "@/lib/items.ts";
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
+import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import { zonedInputToUtc } from "@/lib/time.ts";
 
@@ -39,6 +40,17 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
   if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Nobody types coordinates by hand anymore — we look them up from whatever
+ * location text they gave us. A failed or skipped lookup (no API key, an
+ * address Google can't resolve) just means the conflict engine can't
+ * estimate travel time for this item; it never blocks saving.
+ */
+async function geocode(query: string | null | undefined): Promise<{ lat: number; lng: number } | null> {
+  if (!query) return null;
+  return geocodeAddress(query);
 }
 
 /** Redirects back to the trip with an error banner instead of crashing the request. */
@@ -74,25 +86,28 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   const category = (formData.get("category") as Item["category"] | "") || "activity";
+  const locationName = String(formData.get("locationName") ?? "") || null;
+  const lodging = category === "lodging" ? parseLodgingFields(formData, access.trip.timezone) : null;
+
+  // A lodging item's real location is its address, not the free-text
+  // "Location" label — prefer that for the lookup when both are given.
+  const coords = await geocode(lodging?.address ?? locationName);
 
   try {
     const created = await createItem(access, {
       title: String(formData.get("title") ?? ""),
       notes: String(formData.get("notes") ?? "") || null,
       category,
-      locationName: String(formData.get("locationName") ?? "") || null,
-      locationLat: toNumberOrNull(formData.get("locationLat")),
-      locationLng: toNumberOrNull(formData.get("locationLng")),
+      locationName,
+      locationLat: coords?.lat ?? null,
+      locationLng: coords?.lng ?? null,
       visibility: formData.get("private") === "on" ? "private" : "group",
       startsAt: localInputToDate(formData.get("startsAt"), access.trip.timezone),
       endsAt: localInputToDate(formData.get("endsAt"), access.trip.timezone),
     });
 
-    if (category === "lodging") {
-      const lodging = parseLodgingFields(formData, access.trip.timezone);
-      if (Object.values(lodging).some((v) => v !== null)) {
-        await upsertLodgingDetails(access, created.id, lodging);
-      }
+    if (lodging && Object.values(lodging).some((v) => v !== null)) {
+      await upsertLodgingDetails(access, created.id, lodging);
     }
   } catch (err) {
     withError(tripId, err);
@@ -229,14 +244,19 @@ export async function updateItemAction(
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
+  const locationName = String(formData.get("locationName") ?? "") || null;
+  // Only re-geocode when a lookup actually succeeds — a failed or skipped
+  // one (address didn't change, or Google couldn't resolve it) shouldn't
+  // wipe out coordinates that were already there.
+  const coords = await geocode(locationName);
+
   try {
     await updateItemDetails(access, itemId, {
       title: String(formData.get("title") ?? ""),
       notes: String(formData.get("notes") ?? "") || null,
       category: (formData.get("category") as Item["category"] | "") || undefined,
-      locationName: String(formData.get("locationName") ?? "") || null,
-      locationLat: toNumberOrNull(formData.get("locationLat")),
-      locationLng: toNumberOrNull(formData.get("locationLng")),
+      locationName,
+      ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
     });
   } catch (err) {
     withError(tripId, err);
@@ -252,9 +272,20 @@ export async function updateLodgingDetailsAction(
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
+  const lodging = parseLodgingFields(formData, access.trip.timezone);
+  const coords = await geocode(lodging.address);
 
   try {
-    await upsertLodgingDetails(access, itemId, parseLodgingFields(formData, access.trip.timezone));
+    await upsertLodgingDetails(access, itemId, lodging);
+    // The address is the item's real location for conflict-checking
+    // purposes — keep the item's own locationName/coordinates in sync with
+    // it, same as at creation time.
+    if (lodging.address) {
+      await updateItemDetails(access, itemId, {
+        locationName: lodging.address,
+        ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
+      });
+    }
   } catch (err) {
     withError(tripId, err);
   }
