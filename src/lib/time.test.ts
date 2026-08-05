@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { utcToZonedInputValue, zonedInputToUtc } from "./time.ts";
+import { formatTripDateRange, utcToZonedInputValue, zonedInputToUtc } from "./time.ts";
 
 test("a wall-clock time in a zone behind UTC converts to the later UTC instant", () => {
   // 10:00 in Mexico City (UTC-6, no DST) is 16:00 UTC the same day.
@@ -44,4 +44,24 @@ test("the destination's own clock reads back the original wall time", () => {
     minute: "2-digit",
   }).format(utc);
   assert.equal(formatted, "18:00");
+});
+
+test("a same-month range collapses to one month name and a tight day dash", () => {
+  assert.equal(formatTripDateRange("2026-09-05", "2026-09-12"), "2026, Sep 5-12");
+});
+
+test("a cross-month range within a year spells out both months", () => {
+  assert.equal(formatTripDateRange("2026-10-28", "2026-11-11"), "2026, Oct 28 - Nov 11");
+});
+
+test("a range crossing a year boundary shows both years, abbreviated", () => {
+  assert.equal(formatTripDateRange("2026-12-26", "2027-01-03"), "2026-27, Dec 26 - Jan 3");
+});
+
+test("a single-day trip shows one date, no dash", () => {
+  assert.equal(formatTripDateRange("2026-09-05", "2026-09-05"), "2026, Sep 5");
+});
+
+test("rejects a date that isn't YYYY-MM-DD", () => {
+  assert.throws(() => formatTripDateRange("09/05/2026", "2026-09-12"));
 });

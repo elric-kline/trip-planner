@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { tripsForUser } from "@/lib/trips.ts";
 import { derivePhase, PHASE_LABEL } from "@/lib/phase.ts";
+import { formatTripDateRange } from "@/lib/time.ts";
 
 export default async function TripsPage() {
   const user = await getCurrentUser();
@@ -33,7 +34,7 @@ export default async function TripsPage() {
                 <div>
                   <div className="font-medium">{trip.name}</div>
                   <div className="text-sm text-stone-500">
-                    {trip.destination} · {trip.startDate} – {trip.endDate}
+                    {trip.destination} · {formatTripDateRange(trip.startDate, trip.endDate)}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

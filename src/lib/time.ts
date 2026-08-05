@@ -64,3 +64,53 @@ export function utcToZonedInputValue(instant: Date, timeZone: string): string {
   const parts = Object.fromEntries(dtf.formatToParts(instant).map((p) => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
+
+const MONTH_ABBREV = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * A trip's start/end are plain `YYYY-MM-DD` calendar dates — no timezone, no
+ * instant. Parsed by hand rather than via `new Date(...)` so a rendering
+ * environment's own timezone can never shift the calendar day, same
+ * reasoning as the datetime-local helpers above.
+ */
+function parseCalendarDate(value: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) throw new Error(`Not a YYYY-MM-DD date: ${value}`);
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
+/**
+ * Renders a trip's date span the way a person would say it, not the way a
+ * database stores it: `2026, Sep 5-12`, `2026, Oct 28 - Nov 11`, or, across
+ * a year boundary, `2026-27, Dec 26 - Jan 3`.
+ */
+export function formatTripDateRange(startDate: string, endDate: string): string {
+  const start = parseCalendarDate(startDate);
+  const end = parseCalendarDate(endDate);
+
+  const yearLabel =
+    start.year === end.year ? `${start.year}` : `${start.year}-${String(end.year).slice(-2)}`;
+
+  const startMonth = MONTH_ABBREV[start.month - 1];
+
+  if (start.year === end.year && start.month === end.month) {
+    const days = start.day === end.day ? `${start.day}` : `${start.day}-${end.day}`;
+    return `${yearLabel}, ${startMonth} ${days}`;
+  }
+
+  const endMonth = MONTH_ABBREV[end.month - 1];
+  return `${yearLabel}, ${startMonth} ${start.day} - ${endMonth} ${end.day}`;
+}
