@@ -4,6 +4,7 @@ import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scop
 import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { flagged } from "@/lib/conflicts.ts";
+import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
@@ -63,6 +64,7 @@ export default async function TripPage({
   const ideas = items.filter((i) => i.status === "idea");
   const declined = items.filter((i) => i.status === "declined");
   const findings = flagged(await conflictsForViewer(access));
+  const dietaryFindings = await dietaryWarningsForViewer(access);
 
   const origin = await absoluteOrigin();
 
@@ -102,6 +104,24 @@ export default async function TripPage({
                 {f.reason === "overlap"
                   ? "these overlap in time."
                   : `${Math.round(f.gapMinutes)} min gap, ~${f.travelMinutes} min travel + ${f.overheadMinutes} min overhead.`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {dietaryFindings.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="mb-2 text-sm font-medium text-amber-900">
+            {dietaryFindings.length} dietary {dietaryFindings.length === 1 ? "mismatch" : "mismatches"} on the
+            itinerary
+          </p>
+          <ul className="space-y-1 text-sm text-amber-800">
+            {dietaryFindings.map((f, i) => (
+              <li key={i}>
+                <strong>{f.itemTitle}</strong> may not work for{" "}
+                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
               </li>
             ))}
           </ul>

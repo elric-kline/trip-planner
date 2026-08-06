@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { diningDetails } from "@/db/schema";
 import { canEditItem, getItem, type TripAccess } from "./scope.ts";
@@ -30,6 +30,13 @@ export async function getDiningDetails(itemId: string): Promise<DiningDetails | 
     .where(eq(diningDetails.itemId, itemId))
     .limit(1);
   return row ?? null;
+}
+
+/** Batched lookup so a trip-wide dietary check doesn't issue one query per dining item. */
+export async function getDiningDetailsForItems(itemIds: string[]): Promise<Map<string, DiningDetails>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await db.select().from(diningDetails).where(inArray(diningDetails.itemId, itemIds));
+  return new Map(rows.map((row) => [row.itemId, row]));
 }
 
 /**

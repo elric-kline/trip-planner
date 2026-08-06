@@ -5,6 +5,7 @@ import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
 import { checkRsvp, checkUnlock } from "@/lib/lifecycle.ts";
 import { getLodgingDetails } from "@/lib/lodging.ts";
 import { getDiningDetails } from "@/lib/dining.ts";
+import { dietaryWarningsForItem } from "@/lib/dietary-conflicts-for.ts";
 import {
   declineItemAction,
   deleteItemAction,
@@ -55,6 +56,7 @@ export default async function ItemPage({
   const editable = canEditItem(access, item);
   const lodging = item.category === "lodging" ? await getLodgingDetails(itemId) : null;
   const dining = item.category === "dining" ? await getDiningDetails(itemId) : null;
+  const dietaryFindings = dining ? await dietaryWarningsForItem(access, item, dining.accommodates) : [];
   // Booking details are the thing that gets corrected after an item locks
   // (a late confirmation number, a fixed check-in code) — gated on the same
   // rule as the item itself, not the page's extra "not locked" restriction
@@ -249,6 +251,22 @@ export default async function ItemPage({
             )
           )}
         </section>
+      )}
+
+      {dietaryFindings.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="mb-2 text-sm font-medium text-amber-900">
+            May not work for {dietaryFindings.length === 1 ? "someone on this" : "everyone on this"}
+          </p>
+          <ul className="space-y-1 text-sm text-amber-800">
+            {dietaryFindings.map((f, i) => (
+              <li key={i}>
+                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {item.category === "dining" && (dining || diningEditable) && (
