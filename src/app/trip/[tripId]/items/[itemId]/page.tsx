@@ -18,6 +18,7 @@ import {
 } from "../../actions.ts";
 import { canLockItem } from "@/lib/scope.ts";
 import { utcToZonedInputValue } from "@/lib/time.ts";
+import AddressAutocomplete from "../../AddressAutocomplete.tsx";
 
 const PAYMENT_STATUS_LABEL = {
   prepaid: "Prepaid",
@@ -84,9 +85,9 @@ export default async function ItemPage({
               action={updateLodgingDetailsAction.bind(null, tripId, itemId)}
               className="grid gap-3"
             >
-              <input
+              <AddressAutocomplete
                 name="address"
-                defaultValue={lodging?.address ?? ""}
+                defaultValue={lodging?.address}
                 placeholder="Address"
                 className="input"
               />
@@ -357,7 +358,7 @@ export default async function ItemPage({
               <option value="transport">Transport</option>
               <option value="other">Other</option>
             </select>
-            <input name="locationName" defaultValue={item.locationName ?? ""} className="input" placeholder="Location" />
+            <AddressAutocomplete name="locationName" defaultValue={item.locationName} className="input" placeholder="Location" />
             <p className="-mt-2 text-xs text-stone-400">
               Coordinates are looked up automatically from this{item.category === "lodging" ? ", or from the address below," : ""} for travel-time conflict checks.
             </p>
