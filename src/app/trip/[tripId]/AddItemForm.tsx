@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createItemAction } from "./actions.ts";
+import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import type { TripMemberSummary } from "@/lib/scope.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
@@ -39,7 +40,7 @@ export default function AddItemForm({
           <option value="transport">Transport</option>
           <option value="other">Other</option>
         </select>
-        <input name="locationName" placeholder="Location (optional)" className="input" />
+        <AddressAutocomplete name="locationName" placeholder="Location (optional)" className="input" />
       </div>
       <p className="text-xs text-stone-400">
         We'll look up coordinates from the location automatically — that's what lets the conflict checker estimate travel time between stops.
@@ -49,7 +50,7 @@ export default function AddItemForm({
       {isLodging && (
         <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
           <p className="text-xs font-medium text-stone-500">Lodging details (optional — fill in now or later)</p>
-          <input name="address" placeholder="Address" className="input" />
+          <AddressAutocomplete name="address" placeholder="Address" className="input" />
           <p className="-mt-2 text-xs text-stone-400">Used for both the map and travel-time conflict checks.</p>
           <textarea
             name="checkInInstructions"
