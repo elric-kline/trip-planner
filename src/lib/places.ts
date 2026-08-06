@@ -1,13 +1,13 @@
 /**
- * Address suggestions as you type, via the same Google Maps Platform key as
- * geocode.ts (the project just needs the "Places API" enabled alongside
- * "Geocoding API" — no separate key or account). Same failure shape too: a
- * missing key, a bad request, or a network error all just mean no
- * suggestions rather than a broken input. Selecting a suggestion only fills
- * in text; the actual coordinates still come from geocodeAddress() when the
- * form is submitted, so autocomplete failing never blocks anything.
+ * Address and restaurant lookups via the same Google Maps Platform key as
+ * geocode.ts (the project just needs "Places API" enabled alongside
+ * "Geocoding API" — no separate key or account). Same failure shape
+ * throughout: a missing key, a bad request, or a network error all just mean
+ * no suggestions/details rather than a broken input — nothing here ever
+ * blocks saving or editing an item.
  */
 const AUTOCOMPLETE_API_URL = "https://maps.googleapis.com/maps/api/place/autocomplete/json";
+const DETAILS_API_URL = "https://maps.googleapis.com/maps/api/place/details/json";
 
 /** Below this, predictions are mostly noise and it's not worth the request. */
 const MIN_QUERY_LENGTH = 3;
@@ -20,7 +20,8 @@ type GoogleAutocompleteResponse = {
   predictions?: Array<{ description?: string; place_id?: string }>;
 };
 
-export async function autocompleteAddress(input: string): Promise<PlaceSuggestion[]> {
+/** Shared by autocompleteAddress and searchRestaurants -- same endpoint, same response shape, different query/types. */
+async function placeAutocomplete(input: string, types?: string): Promise<PlaceSuggestion[]> {
   const q = input.trim();
   if (q.length < MIN_QUERY_LENGTH) return [];
 
@@ -30,7 +31,9 @@ export async function autocompleteAddress(input: string): Promise<PlaceSuggestio
     return [];
   }
 
-  const url = `${AUTOCOMPLETE_API_URL}?input=${encodeURIComponent(q)}&key=${apiKey}`;
+  const params = new URLSearchParams({ input: q, key: apiKey });
+  if (types) params.set("types", types);
+  const url = `${AUTOCOMPLETE_API_URL}?${params}`;
 
   let response: Response;
   try {
@@ -63,4 +66,97 @@ export async function autocompleteAddress(input: string): Promise<PlaceSuggestio
   return (data.predictions ?? [])
     .filter((p): p is { description: string; place_id: string } => Boolean(p.description && p.place_id))
     .map((p) => ({ description: p.description, placeId: p.place_id }));
+}
+
+export async function autocompleteAddress(input: string): Promise<PlaceSuggestion[]> {
+  return placeAutocomplete(input);
+}
+
+/**
+ * "Which restaurant did they mean" — restricted to real places (not raw
+ * addresses) and biased toward the trip's destination by appending it to the
+ * query text. No trip-level lat/lng exists to bias by coordinates instead
+ * (see schema.ts's trips table), and in practice combined text like
+ * "Sushi Saito, Tokyo" resolves just as well through this same endpoint.
+ */
+export async function searchRestaurants(query: string, destination: string): Promise<PlaceSuggestion[]> {
+  const d = destination.trim();
+  const combined = d ? `${query} ${d}` : query;
+  return placeAutocomplete(combined, "establishment");
+}
+
+export type PlaceDetails = {
+  name: string | null;
+  formattedAddress: string | null;
+  phone: string | null;
+  website: string | null;
+  /** Google's 0 (free) - 4 (very expensive) scale; null when the venue hasn't reported one. */
+  priceLevel: number | null;
+};
+
+type GoogleDetailsResponse = {
+  status: string;
+  error_message?: string;
+  result?: {
+    name?: string;
+    formatted_address?: string;
+    formatted_phone_number?: string;
+    website?: string;
+    price_level?: number;
+  };
+};
+
+/**
+ * Fetched only once a suggestion is actually selected — not per keystroke,
+ * unlike autocomplete. Deliberately does NOT attempt cuisine or dietary
+ * fields: Places' own data here is either absent or too coarse (a generic
+ * "restaurant"/"food" type, not "Neapolitan pizza") to respect trusting
+ * silently. That inference is the LLM web-read step, a separate piece.
+ */
+export async function getPlaceDetails(placeId: string): Promise<PlaceDetails | null> {
+  const id = placeId.trim();
+  if (!id) return null;
+
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    console.warn(`[places] GOOGLE_MAPS_API_KEY not set — skipping details lookup for "${id}".`);
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    place_id: id,
+    fields: "name,formatted_address,formatted_phone_number,website,price_level",
+    key: apiKey,
+  });
+  const url = `${DETAILS_API_URL}?${params}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  } catch (err) {
+    console.warn(`[places] details request failed for "${id}":`, err);
+    return null;
+  }
+
+  if (!response.ok) {
+    console.warn(`[places] Google Details API returned HTTP ${response.status} for "${id}".`);
+    return null;
+  }
+
+  const data = (await response.json()) as GoogleDetailsResponse;
+  if (data.status !== "OK") {
+    console.warn(
+      `[places] Google Details API status "${data.status}" for "${id}"${data.error_message ? `: ${data.error_message}` : ""}`,
+    );
+    return null;
+  }
+
+  const result = data.result ?? {};
+  return {
+    name: result.name ?? null,
+    formattedAddress: result.formatted_address ?? null,
+    phone: result.formatted_phone_number ?? null,
+    website: result.website ?? null,
+    priceLevel: typeof result.price_level === "number" ? result.price_level : null,
+  };
 }

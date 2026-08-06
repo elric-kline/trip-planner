@@ -139,7 +139,7 @@ export default async function TripPage({
       )}
 
       <Section title="Add something">
-        <AddItemForm tripId={tripId} members={access.members} />
+        <AddItemForm tripId={tripId} destination={access.trip.destination} members={access.members} />
       </Section>
 
       <Section title="People">
