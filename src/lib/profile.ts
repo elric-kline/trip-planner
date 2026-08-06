@@ -2,27 +2,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { dietaryTag, users } from "@/db/schema";
 import type { CurrentUser } from "./auth.ts";
+import type { DietaryTag } from "./dietary.ts";
 
 export class RuleError extends Error {}
-
-export type DietaryTag = (typeof dietaryTag.enumValues)[number];
-
-/** The actual enum values, in the order shown as checkboxes -- see profile/page.tsx. */
-export const DIETARY_TAGS: DietaryTag[] = [...dietaryTag.enumValues];
-
-/** Shared between the profile edit form and anywhere else tags are displayed (the trip People list). */
-export const DIETARY_TAG_LABEL: Record<DietaryTag, string> = {
-  vegetarian: "Vegetarian",
-  vegan: "Vegan",
-  pescatarian: "Pescatarian",
-  gluten_free: "Gluten-free",
-  dairy_free: "Dairy-free",
-  nut_free: "Nut-free",
-  shellfish_free: "Shellfish-free",
-  halal: "Halal",
-  kosher: "Kosher",
-  low_carb: "Low-carb",
-};
 
 export type ProfileInput = {
   name?: string | null;

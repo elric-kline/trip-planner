@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
-import { getProfile, DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/profile.ts";
+import { getProfile } from "@/lib/profile.ts";
+import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { updateProfileAction } from "./actions.ts";
 
 export default async function ProfilePage({

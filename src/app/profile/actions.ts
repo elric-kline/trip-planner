@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { requireUser } from "@/lib/auth.ts";
-import { updateProfile, RuleError, type DietaryTag } from "@/lib/profile.ts";
+import { updateProfile, RuleError } from "@/lib/profile.ts";
+import type { DietaryTag } from "@/lib/dietary.ts";
 
 function withError(err: unknown): never {
   const message = err instanceof RuleError || err instanceof Error ? err.message : "Something went wrong.";

@@ -8,7 +8,7 @@ import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
-import { DIETARY_TAG_LABEL } from "@/lib/profile.ts";
+import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";

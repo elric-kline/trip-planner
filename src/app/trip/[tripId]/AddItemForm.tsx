@@ -4,8 +4,10 @@ import { useState } from "react";
 import { createItemAction } from "./actions.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import type { TripMemberSummary } from "@/lib/scope.ts";
+import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
+const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
 
 /**
  * Extension point: as other categories grow their own structured fields
@@ -23,6 +25,7 @@ export default function AddItemForm({
 }) {
   const [category, setCategory] = useState<Category>("activity");
   const isLodging = category === "lodging";
+  const isDining = category === "dining";
 
   return (
     <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
@@ -89,6 +92,54 @@ export default function AddItemForm({
             <input type="datetime-local" name="cancellationDeadline" className="input" />
           </label>
           <input name="bookingUrl" type="url" placeholder="Booking link (optional)" className="input" />
+        </div>
+      )}
+
+      {isDining && (
+        <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
+          <p className="text-xs font-medium text-stone-500">Dining details (optional — fill in now or later)</p>
+          <input name="cuisine" placeholder="Cuisine (e.g. Neapolitan pizza)" className="input" />
+          <div>
+            <p className="mb-1 text-xs text-stone-500">Accommodates</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+              {DIETARY_TAGS.map((tag) => (
+                <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
+                  <input type="checkbox" name="accommodates" value={tag} />
+                  {DIETARY_TAG_LABEL[tag]}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <input name="partySize" type="number" min={1} step={1} placeholder="Party size" className="input" />
+            <select name="priceRange" defaultValue="" className="input">
+              <option value="">Price</option>
+              {PRICE_RANGES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <input name="contactPhone" placeholder="Restaurant phone" className="input" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
+            <select name="reservedBy" defaultValue="" className="input">
+              <option value="">Reserved under (optional)</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name ?? m.email}
+                </option>
+              ))}
+            </select>
+          </div>
+          <input name="reservationUrl" type="url" placeholder="Reservation link (optional)" className="input" />
+          <textarea
+            name="specialRequests"
+            placeholder="Special requests (optional) — high chair, occasion, etc."
+            className="input"
+            rows={2}
+          />
         </div>
       )}
 

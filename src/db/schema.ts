@@ -5,6 +5,7 @@ import {
   uuid,
   primaryKey,
   doublePrecision,
+  integer,
   index,
   pgEnum,
   boolean,
@@ -277,6 +278,43 @@ export const lodgingDetails = pgTable("lodging_details", {
   costAmount: doublePrecision("cost_amount"),
   /** ISO 4217, e.g. "USD" — free text, not validated against a currency list. */
   costCurrency: text("cost_currency"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const diningPriceRange = pgEnum("dining_price_range", ["$", "$$", "$$$", "$$$$"]);
+
+/**
+ * Same shape as lodgingDetails -- one row per dining item, holding what's
+ * specific to a restaurant reservation. Reservation time is the item's own
+ * startsAt/endsAt, same reasoning as lodging's check-in/out.
+ *
+ * accommodates reuses the dietaryTag vocabulary rather than inventing a
+ * separate one -- that's what lets conflicts.ts-style logic diff it directly
+ * against a trip member's own dietaryRestrictions and raise a warning. A
+ * null/empty accommodates means "not analyzed," same as a missing location
+ * in the travel-time conflict checker -- it does not mean "accommodates
+ * nothing," and must never be treated as a de-facto warning-everyone default.
+ *
+ * placeId is kept even though nothing queries it yet -- it's what a future
+ * LLM-refinement pass re-fetches Place Details from, and what a "View on
+ * Google Maps" link would use, without re-running a text search.
+ */
+export const diningDetails = pgTable("dining_details", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => items.id, { onDelete: "cascade" }),
+  placeId: text("place_id"),
+  cuisine: text("cuisine"),
+  accommodates: dietaryTag("accommodates").array(),
+  partySize: integer("party_size"),
+  priceRange: diningPriceRange("price_range"),
+  /** Must be a member of the trip — enforced in lib/dining.ts, not here. */
+  reservedBy: uuid("reserved_by").references(() => users.id),
+  confirmationNumber: text("confirmation_number"),
+  contactPhone: text("contact_phone"),
+  reservationUrl: text("reservation_url"),
+  specialRequests: text("special_requests"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

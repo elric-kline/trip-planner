@@ -19,8 +19,10 @@ import {
   RuleError,
 } from "@/lib/items.ts";
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
+import { upsertDiningDetails, type DiningDetailsInput, type DiningPriceRange } from "@/lib/dining.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
+import type { DietaryTag } from "@/lib/dietary.ts";
 import { zonedInputToUtc } from "@/lib/time.ts";
 
 /**
@@ -82,15 +84,42 @@ function parseLodgingFields(formData: FormData, timeZone: string): LodgingDetail
   };
 }
 
+/** Shared by the "Add something" form and the item detail page's dining edit form, same as parseLodgingFields. */
+function parseDiningFields(formData: FormData): DiningDetailsInput {
+  const str = (name: string) => String(formData.get(name) ?? "").trim() || null;
+  const tags = formData.getAll("accommodates") as DietaryTag[];
+  const partySize = toNumberOrNull(formData.get("partySize"));
+  return {
+    placeId: str("placeId"),
+    cuisine: str("cuisine"),
+    accommodates: tags.length ? tags : null,
+    partySize: partySize != null ? Math.trunc(partySize) : null,
+    priceRange: (formData.get("priceRange") as DiningPriceRange | "") || null,
+    reservedBy: str("reservedBy"),
+    confirmationNumber: str("confirmationNumber"),
+    contactPhone: str("contactPhone"),
+    reservationUrl: str("reservationUrl"),
+    specialRequests: str("specialRequests"),
+  };
+}
+
+/** True when at least one field was actually filled in — an all-empty form shouldn't create a details row at all. */
+function hasAnyValue(input: Record<string, unknown>): boolean {
+  return Object.values(input).some((v) => v !== null && !(Array.isArray(v) && v.length === 0));
+}
+
 export async function createItemAction(tripId: string, formData: FormData): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   const category = (formData.get("category") as Item["category"] | "") || "activity";
   const locationName = String(formData.get("locationName") ?? "") || null;
   const lodging = category === "lodging" ? parseLodgingFields(formData, access.trip.timezone) : null;
+  const dining = category === "dining" ? parseDiningFields(formData) : null;
 
   // A lodging item's real location is its address, not the free-text
   // "Location" label — prefer that for the lookup when both are given.
+  // Dining has no separate address field -- the restaurant's location *is*
+  // the "Location" field (a future restaurant-search step fills it in).
   const coords = await geocode(lodging?.address ?? locationName);
 
   try {
@@ -106,8 +135,11 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
       endsAt: localInputToDate(formData.get("endsAt"), access.trip.timezone),
     });
 
-    if (lodging && Object.values(lodging).some((v) => v !== null)) {
+    if (lodging && hasAnyValue(lodging)) {
       await upsertLodgingDetails(access, created.id, lodging);
+    }
+    if (dining && hasAnyValue(dining)) {
+      await upsertDiningDetails(access, created.id, dining);
     }
   } catch (err) {
     withError(tripId, err);
@@ -286,6 +318,23 @@ export async function updateLodgingDetailsAction(
         ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
       });
     }
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+export async function updateDiningDetailsAction(
+  tripId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const dining = parseDiningFields(formData);
+
+  try {
+    await upsertDiningDetails(access, itemId, dining);
   } catch (err) {
     withError(tripId, err);
   }
