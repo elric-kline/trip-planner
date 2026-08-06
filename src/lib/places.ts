@@ -16,6 +16,7 @@ export type PlaceSuggestion = { description: string; placeId: string };
 
 type GoogleAutocompleteResponse = {
   status: string;
+  error_message?: string;
   predictions?: Array<{ description?: string; place_id?: string }>;
 };
 
@@ -47,7 +48,14 @@ export async function autocompleteAddress(input: string): Promise<PlaceSuggestio
   const data = (await response.json()) as GoogleAutocompleteResponse;
   if (data.status !== "OK") {
     if (data.status !== "ZERO_RESULTS") {
-      console.warn(`[places] Google API status "${data.status}" for "${q}".`);
+      // error_message is where Google actually says *why* -- e.g. "This API
+      // project is not authorized to use this API" (the legacy Places API
+      // is a separate enablement from "Places API (New)") vs. a key
+      // restriction rejecting a server-side call. The bare status alone
+      // isn't enough to tell those apart.
+      console.warn(
+        `[places] Google API status "${data.status}" for "${q}"${data.error_message ? `: ${data.error_message}` : ""}`,
+      );
     }
     return [];
   }

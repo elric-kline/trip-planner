@@ -16,6 +16,7 @@ export type GeocodeResult = { lat: number; lng: number };
 
 type GoogleGeocodeResponse = {
   status: string;
+  error_message?: string;
   results?: Array<{
     geometry?: { location?: { lat?: number; lng?: number } };
   }>;
@@ -49,7 +50,12 @@ export async function geocodeAddress(query: string): Promise<GeocodeResult | nul
   const data = (await response.json()) as GoogleGeocodeResponse;
   if (data.status !== "OK") {
     if (data.status !== "ZERO_RESULTS") {
-      console.warn(`[geocode] Google API status "${data.status}" for "${q}".`);
+      // error_message carries Google's actual reason (bad/restricted key,
+      // API not enabled, billing) -- the bare status alone often isn't
+      // enough to tell those apart.
+      console.warn(
+        `[geocode] Google API status "${data.status}" for "${q}"${data.error_message ? `: ${data.error_message}` : ""}`,
+      );
     }
     return null;
   }
