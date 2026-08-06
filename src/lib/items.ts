@@ -78,9 +78,8 @@ export async function createItem(
 export async function updateItemDetails(
   access: TripAccess,
   itemId: string,
-  patch: Pick<
-    CreateItemInput,
-    "title" | "notes" | "category" | "locationName" | "locationLat" | "locationLng"
+  patch: Partial<
+    Pick<CreateItemInput, "title" | "notes" | "category" | "locationName" | "locationLat" | "locationLng">
   >,
 ): Promise<Item> {
   const item = await getItem(access, itemId);

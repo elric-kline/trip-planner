@@ -90,6 +90,9 @@ export default async function ItemPage({
                 placeholder="Address"
                 className="input"
               />
+              <p className="-mt-2 text-xs text-stone-400">
+                Coordinates for the map and travel-time conflict checks are looked up from this automatically.
+              </p>
               <textarea
                 name="checkInInstructions"
                 defaultValue={lodging?.checkInInstructions ?? ""}
@@ -355,24 +358,9 @@ export default async function ItemPage({
               <option value="other">Other</option>
             </select>
             <input name="locationName" defaultValue={item.locationName ?? ""} className="input" placeholder="Location" />
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                name="locationLat"
-                type="number"
-                step="any"
-                defaultValue={item.locationLat ?? ""}
-                placeholder="Latitude"
-                className="input"
-              />
-              <input
-                name="locationLng"
-                type="number"
-                step="any"
-                defaultValue={item.locationLng ?? ""}
-                placeholder="Longitude"
-                className="input"
-              />
-            </div>
+            <p className="-mt-2 text-xs text-stone-400">
+              Coordinates are looked up automatically from this{item.category === "lodging" ? ", or from the address below," : ""} for travel-time conflict checks.
+            </p>
             <textarea name="notes" defaultValue={item.notes ?? ""} className="input" rows={3} />
             <button className="btn-secondary justify-self-start">Save</button>
           </form>
