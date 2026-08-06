@@ -87,18 +87,26 @@ test("a network failure degrades to null instead of throwing", async (t) => {
   clearEnv();
 });
 
-test("REQUEST_DENIED (e.g. a bad key) degrades to null instead of throwing", async (t) => {
+test("REQUEST_DENIED (e.g. a bad key) degrades to null, and logs Google's error_message so it's actually diagnosable", async (t) => {
   process.env.GOOGLE_MAPS_API_KEY = "bad_key";
   t.mock.method(
     globalThis,
     "fetch",
     async () =>
-      new Response(JSON.stringify({ status: "REQUEST_DENIED", error_message: "bad key" }), {
-        status: 200,
-      }),
+      new Response(
+        JSON.stringify({
+          status: "REQUEST_DENIED",
+          error_message: "This API project is not authorized to use this API.",
+        }),
+        { status: 200 },
+      ),
   );
+  const warnMock = t.mock.method(console, "warn", () => {});
 
   const result = await geocodeAddress("somewhere");
   assert.equal(result, null);
+  const logged = warnMock.mock.calls.map((c) => c.arguments.join(" ")).join("\n");
+  assert.match(logged, /REQUEST_DENIED/);
+  assert.match(logged, /This API project is not authorized to use this API\./);
   clearEnv();
 });
