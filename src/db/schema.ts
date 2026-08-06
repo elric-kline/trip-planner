@@ -47,6 +47,25 @@ export const rsvpResponse = pgEnum("rsvp_response", ["yes", "no", "maybe"]);
 /** Phase is normally derived from the trip dates; this forces it. */
 export const tripPhase = pgEnum("trip_phase", ["planning", "active", "completed"]);
 
+/**
+ * A fixed, checkable vocabulary rather than free text — the whole point is
+ * to eventually cross-reference this against a dining item's cuisine/menu
+ * tags and raise a warning automatically. Anything that doesn't fit a tag
+ * (severity, a specific ingredient) belongs in dietaryNotes instead.
+ */
+export const dietaryTag = pgEnum("dietary_tag", [
+  "vegetarian",
+  "vegan",
+  "pescatarian",
+  "gluten_free",
+  "dairy_free",
+  "nut_free",
+  "shellfish_free",
+  "halal",
+  "kosher",
+  "low_carb",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
@@ -57,6 +76,14 @@ export const users = pgTable("users", {
    * create a password (see lib/auth.ts's redeemLoginToken).
    */
   passwordHash: text("password_hash"),
+  /**
+   * Both null/empty until a user opts in via their profile. Global to the
+   * user rather than per-trip -- an allergy doesn't change trip to trip.
+   * Once set, it's visible to co-members on any trip they're on (see
+   * scope.ts) -- that's the disclosure; there's no separate per-trip toggle.
+   */
+  dietaryRestrictions: dietaryTag("dietary_restrictions").array(),
+  dietaryNotes: text("dietary_notes"),
   /**
    * No admin surface exists yet — this only marks who a future one should
    * trust. Seeded directly (see db/seed.ts), not settable via the app.

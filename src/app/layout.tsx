@@ -32,17 +32,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Logo />
             </a>
             {user ? (
-              <form
-                action={async () => {
-                  "use server";
-                  await signOut();
-                }}
-              >
-                <span className="mr-3 text-sm text-stone-500">{user.email}</span>
-                <button className="text-sm text-stone-500 underline hover:text-route-700">
-                  Sign out
-                </button>
-              </form>
+              <div className="flex items-center gap-3 text-sm">
+                <a href="/profile" className="text-stone-500 underline hover:text-route-700">
+                  {user.email}
+                </a>
+                <form
+                  action={async () => {
+                    "use server";
+                    await signOut();
+                  }}
+                >
+                  <button className="text-stone-500 underline hover:text-route-700">Sign out</button>
+                </form>
+              </div>
             ) : (
               <a href="/login" className="link text-sm">
                 Sign in

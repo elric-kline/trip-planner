@@ -8,6 +8,7 @@ import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
+import { DIETARY_TAG_LABEL } from "@/lib/profile.ts";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";
@@ -144,10 +145,23 @@ export default async function TripPage({
       <Section title="People">
         <ul className="mb-3 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
           {access.members.map((m) => (
-            <li key={m.userId} className="flex items-center justify-between px-4 py-2 text-sm">
-              <span>{m.name ?? m.email}</span>
-              {m.role === "master_planner" && (
-                <span className="badge bg-amber-100 text-amber-800">Planner</span>
+            <li key={m.userId} className="px-4 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span>{m.name ?? m.email}</span>
+                {m.role === "master_planner" && (
+                  <span className="badge bg-amber-100 text-amber-800">Planner</span>
+                )}
+              </div>
+              {(m.dietaryRestrictions?.length || m.dietaryNotes) && (
+                <p className="mt-0.5 text-xs text-stone-500">
+                  🌱{" "}
+                  {[
+                    ...(m.dietaryRestrictions ?? []).map((tag) => DIETARY_TAG_LABEL[tag]),
+                    m.dietaryNotes,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               )}
             </li>
           ))}
