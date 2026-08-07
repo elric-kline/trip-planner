@@ -22,14 +22,39 @@ export type DayLocationInput = {
  * the trip itself is created (see trips.ts's createTrip) -- see schema.ts's
  * own comment on tripDays for why this is a fixed 1:1 seed rather than
  * something the planner builds up piecemeal.
+ *
+ * onConflictDoNothing rather than a plain insert: trip_days has a unique
+ * (tripId, date) index, so this is safe to call more than once for the
+ * same trip -- which ensureDaysSeeded below relies on to self-heal a trip
+ * with no days without a distinct "insert vs. no-op" code path.
  */
 export async function seedDays(tripId: string, startDate: string, endDate: string): Promise<void> {
   const dates = eachCalendarDate(startDate, endDate);
-  await db.insert(tripDays).values(dates.map((date) => ({ tripId, date })));
+  await db
+    .insert(tripDays)
+    .values(dates.map((date) => ({ tripId, date })))
+    .onConflictDoNothing();
 }
 
-/** Every day of the trip, in date order. */
+/**
+ * Backfills a trip that predates the Days feature (or otherwise ended up
+ * with no trip_days rows -- a failed seedDays call, a trip inserted some
+ * other way) by seeding them lazily the next time its days are viewed,
+ * rather than requiring a one-off migration script run against production.
+ * Idempotent and safe under concurrent requests: seedDays' own
+ * onConflictDoNothing is what actually prevents duplicates, this
+ * length-check is just the common case's fast path that skips the insert
+ * entirely once a trip is already seeded.
+ */
+export async function ensureDaysSeeded(trip: { id: string; startDate: string; endDate: string }): Promise<void> {
+  const [existing] = await db.select({ id: tripDays.id }).from(tripDays).where(eq(tripDays.tripId, trip.id)).limit(1);
+  if (existing) return;
+  await seedDays(trip.id, trip.startDate, trip.endDate);
+}
+
+/** Every day of the trip, in date order. Self-heals a trip with no days first (see ensureDaysSeeded) -- every other reader of trip_days goes through here or waypointsForDays, so this is the one place that needs to know about backfilling. */
 export async function listDays(access: TripAccess): Promise<TripDay[]> {
+  await ensureDaysSeeded(access.trip);
   return db
     .select()
     .from(tripDays)

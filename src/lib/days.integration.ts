@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { tripDays } from "@/db/schema";
 import {
   addWaypoint,
+  ensureDaysSeeded,
   listDays,
   moveWaypoint,
   removeWaypoint,
@@ -28,6 +32,39 @@ test("createTrip seeds one day per calendar date, inclusive, in date order", asy
     assert.equal(day.wakeLocationName, null);
     assert.equal(day.sleepLocationName, null);
   }
+});
+
+test("listDays self-heals a trip with no trip_days rows, same as one that predates the Days feature would have", async (t) => {
+  const owner = await createTestUser();
+  const trip = await createTestTrip(owner, { startDate: "2026-09-05", endDate: "2026-09-08" });
+  t.after(() => cleanupTrip(trip.id, [owner.id]));
+
+  // Simulate a trip whose days were never seeded in the first place --
+  // exactly the state a pre-Days-feature trip is in.
+  await db.delete(tripDays).where(eq(tripDays.tripId, trip.id));
+  const access = await requireTripAccess(trip.id, owner);
+  const before = await db.select().from(tripDays).where(eq(tripDays.tripId, trip.id));
+  assert.equal(before.length, 0, "sanity check: really has no days before listDays runs");
+
+  const days = await listDays(access);
+  assert.deepEqual(
+    days.map((d) => d.date),
+    ["2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08"],
+  );
+});
+
+test("ensureDaysSeeded / listDays is idempotent -- repeated calls never duplicate a trip's day rows", async (t) => {
+  const owner = await createTestUser();
+  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-03" });
+  t.after(() => cleanupTrip(trip.id, [owner.id]));
+  const access = await requireTripAccess(trip.id, owner);
+
+  await listDays(access);
+  await listDays(access);
+  await ensureDaysSeeded(access.trip);
+
+  const rows = await db.select().from(tripDays).where(eq(tripDays.tripId, trip.id));
+  assert.equal(rows.length, 3, "still exactly one row per calendar date, no duplicates");
 });
 
 test("a single-day trip still gets exactly one day", async (t) => {
