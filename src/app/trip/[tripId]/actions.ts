@@ -20,7 +20,7 @@ import {
 } from "@/lib/items.ts";
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import { upsertDiningDetails, type DiningDetailsInput, type DiningPriceRange } from "@/lib/dining.ts";
-import { addWaypoint, moveWaypoint, removeWaypoint, updateDayLocations, type DayLocationInput } from "@/lib/days.ts";
+import { addLocation, moveLocation, removeLocation, setLocationMembers, type DayLocationKind } from "@/lib/days.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import type { DietaryTag } from "@/lib/dietary.ts";
@@ -54,19 +54,6 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 async function geocode(query: string | null | undefined): Promise<{ lat: number; lng: number } | null> {
   if (!query) return null;
   return geocodeAddress(query);
-}
-
-/**
- * Same "never overwrite good coordinates with a failed lookup" rule as
- * geocode() above, plus one more case that only comes up for a Day's
- * wake/sleep fields: explicitly clearing the location text should clear its
- * coordinates too, not leave stale ones paired with a blank name.
- * `null` here means "leave whatever coordinates were already there alone."
- */
-async function geocodeField(name: string | null): Promise<{ lat: number | null; lng: number | null } | null> {
-  if (!name) return { lat: null, lng: null };
-  const coords = await geocode(name);
-  return coords ? { lat: coords.lat, lng: coords.lng } : null;
 }
 
 /** Redirects back to the trip with an error banner instead of crashing the request. */
@@ -375,69 +362,85 @@ export async function createInviteAction(tripId: string, formData: FormData): Pr
   redirect(`/trip/${tripId}?invite=${invite.token}`);
 }
 
-export async function updateDayLocationsAction(
-  tripId: string,
-  dayId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  const wakeLocationName = String(formData.get("wakeLocationName") ?? "") || null;
-  const sleepLocationName = String(formData.get("sleepLocationName") ?? "") || null;
-  const [wake, sleep] = await Promise.all([geocodeField(wakeLocationName), geocodeField(sleepLocationName)]);
-
-  const input: DayLocationInput = { wakeLocationName, sleepLocationName };
-  if (wake) {
-    input.wakeLocationLat = wake.lat;
-    input.wakeLocationLng = wake.lng;
-  }
-  if (sleep) {
-    input.sleepLocationLat = sleep.lat;
-    input.sleepLocationLng = sleep.lng;
-  }
-
-  try {
-    await updateDayLocations(access, dayId, input);
-  } catch (err) {
-    withError(tripId, err);
-  }
-  revalidatePath(`/trip/${tripId}`);
+/** The "includes" checkboxes on a location's own form -- see days.ts's setLocationMembers. */
+function includedMemberIds(formData: FormData): string[] {
+  return formData.getAll("includes").map((v) => String(v));
 }
 
-export async function addWaypointAction(tripId: string, dayId: string, formData: FormData): Promise<void> {
+/**
+ * Shared by setWakeLocationAction/setSleepLocationAction/addStopAction:
+ * geocodes the form's name field, saves the location via whichever
+ * days.ts call the caller needs, then applies whichever members the
+ * form's own "Includes" checkboxes had checked -- skipped if the location
+ * ended up deleted (a blank wake/sleep name) since there's nothing left to
+ * set membership on.
+ */
+/**
+ * Adds a wake, sleep, or stop location to a day. A single generic action
+ * (not addWakeLocationAction/addSleepLocationAction/addStopAction) because
+ * they're all the same operation on the same list, differing only in
+ * `kind` -- see days.ts's addLocation.
+ */
+export async function addLocationAction(
+  tripId: string,
+  dayId: string,
+  kind: DayLocationKind,
+  formData: FormData,
+): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   const name = String(formData.get("name") ?? "");
   const coords = await geocode(name);
 
   try {
-    await addWaypoint(access, dayId, { name, lat: coords?.lat ?? null, lng: coords?.lng ?? null });
+    const created = await addLocation(access, dayId, kind, {
+      name,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+    });
+    await setLocationMembers(access, created.id, includedMemberIds(formData));
   } catch (err) {
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
 }
 
-export async function removeWaypointAction(tripId: string, waypointId: string): Promise<void> {
+export async function removeLocationAction(tripId: string, locationId: string): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   try {
-    await removeWaypoint(access, waypointId);
+    await removeLocation(access, locationId);
   } catch (err) {
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
 }
 
-export async function moveWaypointAction(
+export async function moveLocationAction(
   tripId: string,
-  waypointId: string,
+  locationId: string,
   direction: "up" | "down",
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   try {
-    await moveWaypoint(access, waypointId, direction);
+    await moveLocation(access, locationId, direction);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
+/** A location's "Includes" checkboxes, edited on their own after the location already exists -- see the per-location member picker in DayCard.tsx. */
+export async function setLocationMembersAction(
+  tripId: string,
+  locationId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await setLocationMembers(access, locationId, includedMemberIds(formData));
   } catch (err) {
     withError(tripId, err);
   }

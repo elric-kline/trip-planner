@@ -5,19 +5,20 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tripDays } from "@/db/schema";
 import {
-  addWaypoint,
+  addLocation,
   ensureDaysSeeded,
   listDays,
-  moveWaypoint,
-  removeWaypoint,
-  updateDayLocations,
-  waypointsForDays,
+  locationMembersForLocations,
+  locationsForDays,
+  moveLocation,
+  removeLocation,
+  setLocationMembers,
 } from "./days.ts";
 import { RuleError } from "./items.ts";
 import { requireTripAccess } from "./scope.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
 
-test("createTrip seeds one day per calendar date, inclusive, in date order", async (t) => {
+test("createTrip seeds one day per calendar date, inclusive, in date order, with no locations yet", async (t) => {
   const owner = await createTestUser();
   const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-04" });
   t.after(() => cleanupTrip(trip.id, [owner.id]));
@@ -28,9 +29,10 @@ test("createTrip seeds one day per calendar date, inclusive, in date order", asy
     days.map((d) => d.date),
     ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"],
   );
+
+  const locationsByDay = await locationsForDays(days.map((d) => d.id));
   for (const day of days) {
-    assert.equal(day.wakeLocationName, null);
-    assert.equal(day.sleepLocationName, null);
+    assert.deepEqual(locationsByDay.get(day.id), []);
   }
 });
 
@@ -78,31 +80,90 @@ test("a single-day trip still gets exactly one day", async (t) => {
   assert.equal(days[0].date, "2026-09-01");
 });
 
-test("updateDayLocations: any trip member may set wake/sleep locations, not just the planner", async (t) => {
+async function setupTripWithDay(
+  dates: { startDate: string; endDate: string } = { startDate: "2026-09-01", endDate: "2026-09-02" },
+) {
   const owner = await createTestUser();
   const participant = await createTestUser();
-  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-02" });
+  const trip = await createTestTrip(owner, dates);
   await addTripMember(trip.id, participant.id, "participant");
-  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
-
   const ownerAccess = await requireTripAccess(trip.id, owner);
   const participantAccess = await requireTripAccess(trip.id, participant);
-  const [firstDay] = await listDays(ownerAccess);
+  const [day] = await listDays(ownerAccess);
+  return { trip, owner, participant, ownerAccess, participantAccess, day };
+}
 
-  const updated = await updateDayLocations(participantAccess, firstDay.id, {
-    wakeLocationName: "Seattle, WA",
-    wakeLocationLat: 47.6062,
-    wakeLocationLng: -122.3321,
-    sleepLocationName: "Victoria, BC",
-    sleepLocationLat: 48.4284,
-    sleepLocationLng: -123.3656,
+test("addLocation: any trip member may add one, not just the planner, and every current member is included by default", async (t) => {
+  const { trip, owner, participant, participantAccess, day } = await setupTripWithDay();
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  const wake = await addLocation(participantAccess, day.id, "wake", {
+    name: "Seattle, WA",
+    lat: 47.6062,
+    lng: -122.3321,
   });
+  const sleep = await addLocation(participantAccess, day.id, "sleep", { name: "Victoria, BC" });
 
-  assert.equal(updated.wakeLocationName, "Seattle, WA");
-  assert.equal(updated.sleepLocationName, "Victoria, BC");
+  assert.equal(wake.name, "Seattle, WA");
+  assert.equal(wake.lat, 47.6062);
+  assert.equal(sleep.name, "Victoria, BC");
+
+  const members = await locationMembersForLocations([wake.id, sleep.id]);
+  assert.deepEqual(new Set(members.get(wake.id)), new Set([owner.id, participant.id]));
+  assert.deepEqual(new Set(members.get(sleep.id)), new Set([owner.id, participant.id]));
 });
 
-test("updateDayLocations rejects a day id from a different trip", async (t) => {
+test("addLocation rejects a blank name, for any kind", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay();
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  await assert.rejects(() => addLocation(ownerAccess, day.id, "wake", { name: "   " }), RuleError);
+  await assert.rejects(() => addLocation(ownerAccess, day.id, "sleep", { name: "" }), RuleError);
+  await assert.rejects(() => addLocation(ownerAccess, day.id, "stop", { name: "   " }), RuleError);
+});
+
+test("a day can have more than one wake (or sleep) location at once -- a split departure, each with its own Includes subset", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay();
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  // "My brother and mother depart from Bethlehem, PA; I depart from NYC" --
+  // two different wake locations, same day, disjoint membership.
+  const bethlehem = await addLocation(ownerAccess, day.id, "wake", { name: "Bethlehem, PA" });
+  const nyc = await addLocation(ownerAccess, day.id, "wake", { name: "New York, NY" });
+  await setLocationMembers(ownerAccess, bethlehem.id, [participant.id]);
+  await setLocationMembers(ownerAccess, nyc.id, [owner.id]);
+
+  const locations = (await locationsForDays([day.id])).get(day.id) ?? [];
+  const wakes = locations.filter((l) => l.kind === "wake");
+  assert.equal(wakes.length, 2, "both wake locations coexist");
+
+  const members = await locationMembersForLocations([bethlehem.id, nyc.id]);
+  assert.deepEqual(members.get(bethlehem.id), [participant.id]);
+  assert.deepEqual(members.get(nyc.id), [owner.id]);
+});
+
+test("addLocation appends stops in order, independent of wake/sleep ordering", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" }); // shouldn't affect stop ordering
+
+  const first = await addLocation(ownerAccess, day.id, "stop", { name: "Lunch in Ennis", lat: 52.84, lng: -8.98 });
+  const second = await addLocation(ownerAccess, day.id, "stop", { name: "Dinner in Galway" });
+  assert.equal(first.position, 0);
+  assert.equal(second.position, 1);
+
+  const locations = (await locationsForDays([day.id])).get(day.id) ?? [];
+  assert.deepEqual(
+    locations.filter((l) => l.kind === "stop").map((l) => l.name),
+    ["Lunch in Ennis", "Dinner in Galway"],
+  );
+});
+
+test("addLocation rejects a day id from a different trip, and an unknown day id", async (t) => {
   const owner = await createTestUser();
   const tripA = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
   const tripB = await createTestTrip(owner, { startDate: "2026-10-01", endDate: "2026-10-01" });
@@ -112,70 +173,58 @@ test("updateDayLocations rejects a day id from a different trip", async (t) => {
   const accessB = await requireTripAccess(tripB.id, owner);
   const [dayOfTripB] = await listDays(accessB);
 
-  await assert.rejects(
-    () => updateDayLocations(accessA, dayOfTripB.id, { wakeLocationName: "Wrong trip" }),
-    RuleError,
-  );
+  await assert.rejects(() => addLocation(accessA, dayOfTripB.id, "wake", { name: "Wrong trip" }), RuleError);
+  await assert.rejects(() => addLocation(accessA, randomUUID(), "wake", { name: "Made up day" }), RuleError);
 });
 
-test("updateDayLocations rejects an unknown day id", async (t) => {
-  const owner = await createTestUser();
-  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
-  t.after(() => cleanupTrip(trip.id, [owner.id]));
-  const access = await requireTripAccess(trip.id, owner);
-
-  await assert.rejects(() => updateDayLocations(access, randomUUID(), { wakeLocationName: "x" }), RuleError);
+test("locationsForDays([]) returns an empty map without querying", async () => {
+  assert.deepEqual(await locationsForDays([]), new Map());
 });
 
-test("addWaypoint: rejects a blank name, otherwise appends in order and is retrievable via waypointsForDays", async (t) => {
-  const owner = await createTestUser();
-  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
-  t.after(() => cleanupTrip(trip.id, [owner.id]));
-  const access = await requireTripAccess(trip.id, owner);
-  const [day] = await listDays(access);
+test("moveLocation swaps position with its neighbor of the same kind only; no-ops at either end", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
 
-  await assert.rejects(() => addWaypoint(access, day.id, { name: "   " }), RuleError);
+  await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" }); // a different kind -- shouldn't be reachable by moving a stop
+  const a = await addLocation(ownerAccess, day.id, "stop", { name: "A" });
+  const b = await addLocation(ownerAccess, day.id, "stop", { name: "B" });
+  const c = await addLocation(ownerAccess, day.id, "stop", { name: "C" });
 
-  const first = await addWaypoint(access, day.id, { name: "Lunch in Ennis", lat: 52.84, lng: -8.98 });
-  const second = await addWaypoint(access, day.id, { name: "Dinner in Galway" });
-  assert.equal(first.position, 0);
-  assert.equal(second.position, 1);
+  async function stopNames() {
+    return ((await locationsForDays([day.id])).get(day.id) ?? [])
+      .filter((l) => l.kind === "stop")
+      .map((l) => l.name);
+  }
 
-  assert.deepEqual(await waypointsForDays([]), new Map());
-  const map = await waypointsForDays([day.id]);
-  assert.deepEqual(
-    map.get(day.id)?.map((w) => w.name),
-    ["Lunch in Ennis", "Dinner in Galway"],
-  );
+  await moveLocation(ownerAccess, b.id, "up"); // B, A, C
+  assert.deepEqual(await stopNames(), ["B", "A", "C"]);
+
+  await moveLocation(ownerAccess, b.id, "up"); // already first -- no-op
+  assert.deepEqual(await stopNames(), ["B", "A", "C"]);
+
+  await moveLocation(ownerAccess, c.id, "down"); // already last -- no-op
+  assert.deepEqual(await stopNames(), ["B", "A", "C"]);
+
+  void a;
 });
 
-test("moveWaypoint swaps position with its neighbor; no-ops at either end", async (t) => {
-  const owner = await createTestUser();
-  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
-  t.after(() => cleanupTrip(trip.id, [owner.id]));
-  const access = await requireTripAccess(trip.id, owner);
-  const [day] = await listDays(access);
+test("moveLocation on the only location of its kind is a no-op in both directions", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay();
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
 
-  const a = await addWaypoint(access, day.id, { name: "A" });
-  const b = await addWaypoint(access, day.id, { name: "B" });
-  const c = await addWaypoint(access, day.id, { name: "C" });
+  const wake = await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" });
+  await moveLocation(ownerAccess, wake.id, "up");
+  await moveLocation(ownerAccess, wake.id, "down");
 
-  await moveWaypoint(access, b.id, "up"); // B, A, C
-  let names = (await waypointsForDays([day.id])).get(day.id)?.map((w) => w.name);
-  assert.deepEqual(names, ["B", "A", "C"]);
-
-  await moveWaypoint(access, b.id, "up"); // already first -- no-op
-  names = (await waypointsForDays([day.id])).get(day.id)?.map((w) => w.name);
-  assert.deepEqual(names, ["B", "A", "C"]);
-
-  await moveWaypoint(access, c.id, "down"); // already last -- no-op
-  names = (await waypointsForDays([day.id])).get(day.id)?.map((w) => w.name);
-  assert.deepEqual(names, ["B", "A", "C"]);
-
-  void a; // referenced only to name the initial ordering clearly
+  const locations = (await locationsForDays([day.id])).get(day.id) ?? [];
+  assert.equal(locations.length, 1);
+  assert.equal(locations[0].name, "Seattle, WA");
 });
 
-test("removeWaypoint deletes it; rejects a waypoint belonging to another trip's day", async (t) => {
+test("removeLocation deletes it (any kind); rejects a location belonging to another trip's day, and an unknown id", async (t) => {
   const owner = await createTestUser();
   const tripA = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
   const tripB = await createTestTrip(owner, { startDate: "2026-10-01", endDate: "2026-10-01" });
@@ -186,19 +235,56 @@ test("removeWaypoint deletes it; rejects a waypoint belonging to another trip's 
   const [dayA] = await listDays(accessA);
   const [dayB] = await listDays(accessB);
 
-  const waypointOnB = await addWaypoint(accessB, dayB.id, { name: "Belongs to trip B" });
-  await assert.rejects(() => removeWaypoint(accessA, waypointOnB.id), RuleError);
+  const stopOnB = await addLocation(accessB, dayB.id, "stop", { name: "Belongs to trip B" });
+  await assert.rejects(() => removeLocation(accessA, stopOnB.id), RuleError);
 
-  const waypointOnA = await addWaypoint(accessA, dayA.id, { name: "Belongs to trip A" });
-  await removeWaypoint(accessA, waypointOnA.id);
-  assert.deepEqual((await waypointsForDays([dayA.id])).get(dayA.id), []);
+  const wakeOnA = await addLocation(accessA, dayA.id, "wake", { name: "Belongs to trip A" });
+  await removeLocation(accessA, wakeOnA.id);
+  assert.deepEqual((await locationsForDays([dayA.id])).get(dayA.id), []);
+
+  await assert.rejects(() => removeLocation(accessA, randomUUID()), RuleError);
 });
 
-test("removeWaypoint rejects an unknown waypoint id", async (t) => {
-  const owner = await createTestUser();
-  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
-  t.after(() => cleanupTrip(trip.id, [owner.id]));
-  const access = await requireTripAccess(trip.id, owner);
+test("setLocationMembers replaces the included set wholesale, and silently drops ids that aren't actually trip members", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay();
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
 
-  await assert.rejects(() => removeWaypoint(access, randomUUID()), RuleError);
+  const wake = await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" });
+  // Starts as both members (default all-in).
+  let members = await locationMembersForLocations([wake.id]);
+  assert.deepEqual(new Set(members.get(wake.id)), new Set([owner.id, participant.id]));
+
+  // Narrow to just the owner.
+  const outsiderId = randomUUID();
+  await setLocationMembers(ownerAccess, wake.id, [owner.id, outsiderId]);
+  members = await locationMembersForLocations([wake.id]);
+  assert.deepEqual(members.get(wake.id), [owner.id], "the non-member id was silently dropped");
+
+  // Widen back to everyone.
+  await setLocationMembers(ownerAccess, wake.id, [owner.id, participant.id]);
+  members = await locationMembersForLocations([wake.id]);
+  assert.deepEqual(new Set(members.get(wake.id)), new Set([owner.id, participant.id]));
+
+  // Down to nobody is a valid (if unusual) state -- not an error.
+  await setLocationMembers(ownerAccess, wake.id, []);
+  members = await locationMembersForLocations([wake.id]);
+  assert.deepEqual(members.get(wake.id), []);
+});
+
+test("setLocationMembers rejects a location id that doesn't belong to this trip", async (t) => {
+  const owner = await createTestUser();
+  const tripA = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
+  const tripB = await createTestTrip(owner, { startDate: "2026-10-01", endDate: "2026-10-01" });
+  t.after(() => cleanupTrip(tripA.id, []).then(() => cleanupTrip(tripB.id, [owner.id])));
+
+  const accessA = await requireTripAccess(tripA.id, owner);
+  const accessB = await requireTripAccess(tripB.id, owner);
+  const [dayB] = await listDays(accessB);
+  const stopOnB = await addLocation(accessB, dayB.id, "stop", { name: "Belongs to trip B" });
+
+  await assert.rejects(() => setLocationMembers(accessA, stopOnB.id, [owner.id]), RuleError);
+});
+
+test("locationMembersForLocations([]) returns an empty map without querying", async () => {
+  assert.deepEqual(await locationMembersForLocations([]), new Map());
 });

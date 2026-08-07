@@ -17,11 +17,14 @@ export default function AddressAutocomplete({
   defaultValue = "",
   placeholder,
   className,
+  restrict,
 }: {
   name: string;
   defaultValue?: string | null;
   placeholder?: string;
   className?: string;
+  /** "place" narrows suggestions to cities/towns/villages (a trip day's wake/sleep/stop fields); omitted keeps the full unrestricted address lookup. */
+  restrict?: "place";
 }) {
   const [value, setValue] = useState(defaultValue ?? "");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -58,7 +61,8 @@ export default function AddressAutocomplete({
     const thisRequestId = ++requestIdRef.current;
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(next)}`);
+        const restrictParam = restrict ? `&restrict=${restrict}` : "";
+        const res = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(next)}${restrictParam}`);
         if (thisRequestId !== requestIdRef.current) return; // a newer keystroke already superseded this
         if (!res.ok) return;
         const data = (await res.json()) as { suggestions?: Suggestion[] };
