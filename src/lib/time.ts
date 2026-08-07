@@ -93,6 +93,43 @@ function parseCalendarDate(value: string): { year: number; month: number; day: n
 }
 
 /**
+ * Every `YYYY-MM-DD` from `startDate` to `endDate`, inclusive. Used to seed
+ * one trip_days row per calendar date (see lib/days.ts's seedDays) — walked
+ * via `Date.UTC` day-by-day rather than any zoned arithmetic, since a plain
+ * calendar date has no timezone of its own to begin with (same reasoning as
+ * parseCalendarDate below): there's no DST to cross when nothing is anchored
+ * to a zone.
+ */
+export function eachCalendarDate(startDate: string, endDate: string): string[] {
+  const start = parseCalendarDate(startDate);
+  const end = parseCalendarDate(endDate);
+  const startMs = Date.UTC(start.year, start.month - 1, start.day);
+  const endMs = Date.UTC(end.year, end.month - 1, end.day);
+  if (endMs < startMs) throw new Error("endDate can't come before startDate.");
+
+  const dates: string[] = [];
+  for (let ms = startMs; ms <= endMs; ms += 24 * 60 * 60 * 1000) {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${y}-${mo}-${day}`);
+  }
+  return dates;
+}
+
+/** A single `YYYY-MM-DD` the way a person would say it: `Wed, Sep 2`. Same UTC-anchored-midnight trick as eachCalendarDate to keep the weekday calculation from drifting with the rendering environment's own zone. */
+export function formatCalendarDate(date: string): string {
+  const { year, month, day } = parseCalendarDate(date);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+/**
  * Renders a trip's date span the way a person would say it, not the way a
  * database stores it: `2026, Sep 5-12`, `2026, Oct 28 - Nov 11`, or, across
  * a year boundary, `2026-27, Dec 26 - Jan 3`.

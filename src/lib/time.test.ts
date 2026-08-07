@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatTripDateRange, utcToZonedInputValue, zonedInputToUtc } from "./time.ts";
+import {
+  eachCalendarDate,
+  formatCalendarDate,
+  formatTripDateRange,
+  utcToZonedInputValue,
+  zonedInputToUtc,
+} from "./time.ts";
 
 test("a wall-clock time in a zone behind UTC converts to the later UTC instant", () => {
   // 10:00 in Mexico City (UTC-6, no DST) is 16:00 UTC the same day.
@@ -64,4 +70,31 @@ test("a single-day trip shows one date, no dash", () => {
 
 test("rejects a date that isn't YYYY-MM-DD", () => {
   assert.throws(() => formatTripDateRange("09/05/2026", "2026-09-12"));
+});
+
+test("eachCalendarDate walks every date inclusive of both ends", () => {
+  assert.deepEqual(eachCalendarDate("2026-09-05", "2026-09-08"), [
+    "2026-09-05",
+    "2026-09-06",
+    "2026-09-07",
+    "2026-09-08",
+  ]);
+});
+
+test("eachCalendarDate handles a single-day trip and a month boundary", () => {
+  assert.deepEqual(eachCalendarDate("2026-09-05", "2026-09-05"), ["2026-09-05"]);
+  assert.deepEqual(eachCalendarDate("2026-01-30", "2026-02-02"), [
+    "2026-01-30",
+    "2026-01-31",
+    "2026-02-01",
+    "2026-02-02",
+  ]);
+});
+
+test("eachCalendarDate rejects an end date before the start date", () => {
+  assert.throws(() => eachCalendarDate("2026-09-08", "2026-09-05"));
+});
+
+test("formatCalendarDate reads 'Wed, Sep 2', the weekday computed without any local-zone drift", () => {
+  assert.equal(formatCalendarDate("2026-09-02"), "Wed, Sep 2");
 });

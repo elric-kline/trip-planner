@@ -8,8 +8,10 @@ import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
+import DaysSection from "./DaysSection.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
+import { listDays, waypointsForDays } from "@/lib/days.ts";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";
@@ -65,6 +67,9 @@ export default async function TripPage({
   const declined = items.filter((i) => i.status === "declined");
   const findings = flagged(await conflictsForViewer(access));
   const dietaryFindings = await dietaryWarningsForViewer(access);
+
+  const days = await listDays(access);
+  const waypointsByDay = await waypointsForDays(days.map((d) => d.id));
 
   const origin = await absoluteOrigin();
 
@@ -127,6 +132,10 @@ export default async function TripPage({
           </ul>
         </div>
       )}
+
+      <Section title="Days" subtitle="Where each day wakes up, beds down, and passes through">
+        <DaysSection tripId={tripId} days={days} waypointsByDay={waypointsByDay} />
+      </Section>
 
       <Section title="Itinerary" subtitle="Locked items, in order">
         {locked.length === 0 ? (

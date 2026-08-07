@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { invites, trips, tripMembers } from "@/db/schema";
 import type { CurrentUser } from "./auth.ts";
 import { AccessError } from "./scope.ts";
+import { seedDays } from "./days.ts";
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -35,6 +36,11 @@ export async function createTrip(owner: CurrentUser, input: CreateTripInput) {
   await db
     .insert(tripMembers)
     .values({ tripId: trip.id, userId: owner.id, role: "master_planner" });
+
+  // One trip_days row per calendar date, ready for the planner to fill in --
+  // see days.ts's seedDays and schema.ts's tripDays for why this is seeded
+  // once here rather than built up piecemeal.
+  await seedDays(trip.id, trip.startDate, trip.endDate);
 
   return trip;
 }
