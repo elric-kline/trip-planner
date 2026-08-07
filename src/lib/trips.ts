@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { invites, trips, tripMembers } from "@/db/schema";
 import type { CurrentUser } from "./auth.ts";
 import { AccessError } from "./scope.ts";
-import { seedDays } from "./days.ts";
+import { autoIncludeSoleLocations, seedDays } from "./days.ts";
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -99,6 +99,12 @@ export async function acceptInvite(token: string, user: CurrentUser) {
     .insert(tripMembers)
     .values({ tripId: invite.tripId, userId: user.id, role: invite.role })
     .onConflictDoNothing();
+
+  // Onboard them into whatever the trip has already planned, for the parts
+  // that aren't actually in question -- see days.ts's autoIncludeSoleLocations.
+  // Idempotent, so harmless to run again if this invite (or another one to
+  // the same trip) was already accepted.
+  await autoIncludeSoleLocations(invite.tripId, user.id);
 
   await db
     .update(invites)

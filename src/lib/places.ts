@@ -73,6 +73,17 @@ export async function autocompleteAddress(input: string): Promise<PlaceSuggestio
 }
 
 /**
+ * Restricted to Google's "(cities)" type collection -- localities, towns,
+ * and villages, not street addresses or businesses. Used for a trip day's
+ * wake/sleep/stop locations, which are meant to answer "which town," not a
+ * precise address -- that's what an Activity/Lodging/Dining item's own
+ * location field is for, and stays on the unrestricted autocompleteAddress.
+ */
+export async function autocompletePlace(input: string): Promise<PlaceSuggestion[]> {
+  return placeAutocomplete(input, "(cities)");
+}
+
+/**
  * "Which restaurant did they mean" — restricted to real places (not raw
  * addresses) and biased toward the trip's destination by appending it to the
  * query text. No trip-level lat/lng exists to bias by coordinates instead

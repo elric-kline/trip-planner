@@ -1,4 +1,4 @@
-import type { TripDay, TripDayWaypoint } from "@/lib/days.ts";
+import type { TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import DayCard from "./DayCard.tsx";
 
@@ -7,8 +7,8 @@ import DayCard from "./DayCard.tsx";
  * down each day, whatever towns it passes through in between ("tour
  * destinations"), and the day's own draft itinerary -- items land here by
  * day, not in a separate cross-day "Proposed" list (see page.tsx). See
- * schema.ts's tripDays comment for why wake/sleep are their own geocoded
- * fields rather than derived from a lodging item's check-in/check-out.
+ * schema.ts's tripDayLocations comment for why wake/sleep/stops are all
+ * one table rather than tripDays columns plus a separate waypoints table.
  *
  * Just a thin map over DayCard, which owns all the actual open/closed
  * interaction (see its own comment for why that needs to be a client
@@ -17,19 +17,23 @@ import DayCard from "./DayCard.tsx";
 export default function DaysSection({
   tripId,
   days,
-  waypointsByDay,
+  locationsByDay,
+  locationMembers,
   itemsByDay,
   timezone,
   destination,
   members,
+  viewerId,
 }: {
   tripId: string;
   days: TripDay[];
-  waypointsByDay: Map<string, TripDayWaypoint[]>;
+  locationsByDay: Map<string, TripDayLocation[]>;
+  locationMembers: Map<string, string[]>;
   itemsByDay: Map<string, Item[]>;
   timezone: string;
   destination: string;
   members: TripMemberSummary[];
+  viewerId: string;
 }) {
   return (
     <div className="space-y-3">
@@ -38,11 +42,13 @@ export default function DaysSection({
           key={day.id}
           tripId={tripId}
           day={day}
-          waypoints={waypointsByDay.get(day.id) ?? []}
+          locations={locationsByDay.get(day.id) ?? []}
+          locationMembers={locationMembers}
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
           destination={destination}
           members={members}
+          viewerId={viewerId}
         />
       ))}
     </div>

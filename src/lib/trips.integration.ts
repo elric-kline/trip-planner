@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { acceptInvite, createInvite, createTrip, tripsForUser } from "./trips.ts";
-import { AccessError } from "./scope.ts";
+import { AccessError, requireTripAccess } from "./scope.ts";
+import { addLocation, listDays, locationMembersForLocations, unresolvedBranchesForMember } from "./days.ts";
 import { createTestUser, createTestTrip, cleanupTrip } from "./test-fixtures.ts";
 
 test("createTrip rejects a blank name and an end date before the start date", async (t) => {
@@ -86,4 +87,54 @@ test("acceptInvite rejects an unknown token, and a token is genuinely single-use
 
   const memberships = await tripsForUser(invitee);
   assert.equal(memberships.filter((r) => r.trip.id === trip.id).length, 1);
+});
+
+test("acceptInvite auto-includes a new member into every day-location group that has no real choice to make", async (t) => {
+  const owner = await createTestUser();
+  const invitee = await createTestUser();
+  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
+  t.after(() => cleanupTrip(trip.id, [owner.id, invitee.id]));
+
+  const ownerAccess = await requireTripAccess(trip.id, owner);
+  const [day] = await listDays(ownerAccess);
+  // A single wake location -- no ambiguity, so a new member should just be
+  // added to it, same as if they'd been there when it was created.
+  const wake = await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" });
+
+  const invite = await createInvite(trip.id, owner);
+  await acceptInvite(invite.token, invitee);
+
+  const members = await locationMembersForLocations([wake.id]);
+  assert.deepEqual(new Set(members.get(wake.id)), new Set([owner.id, invitee.id]));
+
+  const branches = await unresolvedBranchesForMember(trip.id, invitee.id);
+  assert.deepEqual(branches, [], "nothing left for the wizard to ask -- there was no real fork");
+});
+
+test("acceptInvite leaves an actual split day for the join wizard, not auto-resolved either way", async (t) => {
+  const owner = await createTestUser();
+  const invitee = await createTestUser();
+  const trip = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
+  t.after(() => cleanupTrip(trip.id, [owner.id, invitee.id]));
+
+  const ownerAccess = await requireTripAccess(trip.id, owner);
+  const [day] = await listDays(ownerAccess);
+  const bethlehem = await addLocation(ownerAccess, day.id, "wake", { name: "Bethlehem, PA" });
+  const nyc = await addLocation(ownerAccess, day.id, "wake", { name: "New York, NY" });
+
+  const invite = await createInvite(trip.id, owner);
+  await acceptInvite(invite.token, invitee);
+
+  // Not silently dropped into either leg.
+  const members = await locationMembersForLocations([bethlehem.id, nyc.id]);
+  assert.ok(!(members.get(bethlehem.id) ?? []).includes(invitee.id));
+  assert.ok(!(members.get(nyc.id) ?? []).includes(invitee.id));
+
+  const branches = await unresolvedBranchesForMember(trip.id, invitee.id);
+  assert.equal(branches.length, 1);
+  assert.equal(branches[0].kind, "wake");
+  assert.deepEqual(
+    new Set(branches[0].locations.map((l) => l.name)),
+    new Set(["Bethlehem, PA", "New York, NY"]),
+  );
 });

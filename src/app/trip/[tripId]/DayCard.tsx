@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { formatCalendarDate } from "@/lib/time.ts";
-import type { TripDay, TripDayWaypoint } from "@/lib/days.ts";
+import type { DayLocationKind, TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import DayItemBuilder from "./DayItemBuilder.tsx";
-import { addWaypointAction, moveWaypointAction, removeWaypointAction, updateDayLocationsAction } from "./actions.ts";
+import { addLocationAction, moveLocationAction, removeLocationAction, setLocationMembersAction } from "./actions.ts";
 
 /** A short one-line preview of what's in the day, shown whether or not it's open. */
 function itemsSummary(items: Item[]): string {
@@ -17,17 +17,139 @@ function itemsSummary(items: Item[]): string {
 }
 
 /**
- * Wake/sleep/stops are the day's own *definition* -- where it starts, ends,
- * and passes through -- not something "in" the day the way an activity or
- * a dinner reservation is. Summarized in this line whether or not anything
- * is set yet, so the pencil always has somewhere to attach.
+ * The row of member toggles on the "add a location" form -- name="includes",
+ * one checkbox per trip member, all checked by default ("default all-in,
+ * selectable" -- see schema.ts's tripDayLocationMembers).
  */
-function definitionSummary(day: TripDay, waypoints: TripDayWaypoint[]): string {
-  const parts: string[] = [];
-  if (day.wakeLocationName) parts.push(`Wakes in ${day.wakeLocationName}`);
-  if (day.sleepLocationName) parts.push(`Sleeps in ${day.sleepLocationName}`);
-  if (waypoints.length > 0) parts.push(`Stops: ${waypoints.map((w) => w.name).join(", ")}`);
-  return parts.length > 0 ? parts.join(" · ") : "No wake/sleep or stops set yet";
+function IncludesCheckboxes({ members }: { members: TripMemberSummary[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {members.map((m) => (
+        <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
+          <input type="checkbox" name="includes" value={m.userId} defaultChecked />
+          {m.name ?? m.email}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One existing location's row in the editor: name, reorder/remove among
+ * its own kind, and its own "Includes" checkboxes (reflecting who's
+ * actually in it right now, not the all-checked default the add-form
+ * uses -- this location already exists, so its real membership is known).
+ */
+function LocationRow({
+  tripId,
+  location,
+  index,
+  members,
+  includedIds,
+}: {
+  tripId: string;
+  location: TripDayLocation;
+  index: number;
+  members: TripMemberSummary[];
+  includedIds: string[];
+}) {
+  return (
+    <li className="rounded border border-stone-200 bg-white p-2">
+      <div className="flex items-center justify-between gap-2 text-sm text-stone-700">
+        <span>
+          {index + 1}. {location.name}
+        </span>
+        <div className="flex shrink-0 items-center gap-1 text-xs">
+          <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
+            <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
+              ↑
+            </button>
+          </form>
+          <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
+            <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
+              ↓
+            </button>
+          </form>
+          <form action={removeLocationAction.bind(null, tripId, location.id)}>
+            <button type="submit" className="px-1 text-red-500 underline">
+              Remove
+            </button>
+          </form>
+        </div>
+      </div>
+      <form
+        action={setLocationMembersAction.bind(null, tripId, location.id)}
+        className="mt-2 flex flex-wrap items-center gap-2"
+      >
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {members.map((m) => (
+            <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
+              <input type="checkbox" name="includes" value={m.userId} defaultChecked={includedIds.includes(m.userId)} />
+              {m.name ?? m.email}
+            </label>
+          ))}
+        </div>
+        <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
+          Save includes
+        </button>
+      </form>
+    </li>
+  );
+}
+
+/**
+ * A day's wake, sleep, or stop locations, all rendered the same way -- a
+ * list of existing ones (each with its own Includes editor) plus an
+ * "add another" form. Wake and sleep are lists too, not a single slot:
+ * a split departure (my brother and mother leave from Bethlehem, PA; I
+ * leave from NYC) is two different wake locations on the same day, each
+ * with a different Includes subset -- see days.ts's addLocation.
+ */
+function LocationKindSection({
+  tripId,
+  dayId,
+  kind,
+  label,
+  placeholder,
+  locations,
+  locationMembers,
+  members,
+}: {
+  tripId: string;
+  dayId: string;
+  kind: DayLocationKind;
+  label: string;
+  placeholder: string;
+  locations: TripDayLocation[];
+  locationMembers: Map<string, string[]>;
+  members: TripMemberSummary[];
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium text-stone-500">{label}</p>
+      {locations.length > 0 && (
+        <ul className="mb-3 space-y-2">
+          {locations.map((location, i) => (
+            <LocationRow
+              key={location.id}
+              tripId={tripId}
+              location={location}
+              index={i}
+              members={members}
+              includedIds={locationMembers.get(location.id) ?? []}
+            />
+          ))}
+        </ul>
+      )}
+      <form action={addLocationAction.bind(null, tripId, dayId, kind)} className="space-y-2">
+        <AddressAutocomplete name="name" placeholder={placeholder} className="input" restrict="place" />
+        <IncludesCheckboxes members={members} />
+        <button type="submit" className="btn-secondary">
+          Add
+        </button>
+      </form>
+    </div>
+  );
 }
 
 /**
@@ -40,26 +162,52 @@ function definitionSummary(day: TripDay, waypoints: TripDayWaypoint[]): string {
  * working space" for activities/dining/lodging -- things the day *has*),
  * clicking the pencil opens/closes the wake/sleep/stops editor (properties
  * *of* the day itself).
+ *
+ * The always-visible summary line is filtered to locations that include
+ * the *viewer* -- "my personal view shows me where I'm going to be," not
+ * everyone else's leg of a split day (see schema.ts's tripDayLocationMembers
+ * for the Bethlehem/NYC example). The pencil's editor panel shows every
+ * location regardless of who's in it, since managing the whole party's
+ * plan is still any trip member's job.
  */
 export default function DayCard({
   tripId,
   day,
-  waypoints,
+  locations,
+  locationMembers,
   items,
   timezone,
   destination,
   members,
+  viewerId,
 }: {
   tripId: string;
   day: TripDay;
-  waypoints: TripDayWaypoint[];
+  locations: TripDayLocation[];
+  locationMembers: Map<string, string[]>;
   items: Item[];
   timezone: string;
   destination: string;
   members: TripMemberSummary[];
+  viewerId: string;
 }) {
   const [itemsOpen, setItemsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+
+  const wakes = locations.filter((l) => l.kind === "wake");
+  const sleeps = locations.filter((l) => l.kind === "sleep");
+  const stops = locations.filter((l) => l.kind === "stop"); // already position-sorted (see locationsForDays)
+
+  const includesViewer = (locationId: string) => (locationMembers.get(locationId) ?? []).includes(viewerId);
+  const myWakes = wakes.filter((l) => includesViewer(l.id));
+  const mySleeps = sleeps.filter((l) => includesViewer(l.id));
+  const myStops = stops.filter((l) => includesViewer(l.id));
+
+  const wakeSleepLine = [...myWakes.map((l) => `Wakes in ${l.name}`), ...mySleeps.map((l) => `Sleeps in ${l.name}`)].join(
+    " — ",
+  );
+  const hasAnythingForMe = Boolean(myWakes.length || mySleeps.length || myStops.length);
+  const hasAnythingAtAll = locations.length > 0;
 
   return (
     <div className="rounded-md border border-stone-200 bg-white p-4">
@@ -77,7 +225,22 @@ export default function DayCard({
       </button>
 
       <div className="mt-0.5 flex items-start justify-between gap-2 pl-[1.35em]">
-        <p className="text-xs text-stone-400">{definitionSummary(day, waypoints)}</p>
+        <div className="text-xs text-stone-400">
+          {!hasAnythingForMe ? (
+            <p>{hasAnythingAtAll ? "Set for other travelers, not you" : "No wake/sleep or stops set yet"}</p>
+          ) : (
+            <>
+              {wakeSleepLine && <p>{wakeSleepLine}</p>}
+              {myStops.length > 0 && (
+                <ul>
+                  {myStops.map((s) => (
+                    <li key={s.id}>{s.name}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => setEditOpen((v) => !v)}
@@ -92,85 +255,36 @@ export default function DayCard({
 
       {editOpen && (
         <div className="mt-3 space-y-4 rounded-md border border-stone-100 bg-stone-50 p-3">
-          <div>
-            <p className="mb-2 text-xs font-medium text-stone-500">Wake / sleep locations</p>
-            <form
-              action={updateDayLocationsAction.bind(null, tripId, day.id)}
-              className="grid grid-cols-2 gap-3"
-            >
-              <label className="block text-sm">
-                <span className="mb-1 block text-stone-600">Wake up in</span>
-                <AddressAutocomplete
-                  name="wakeLocationName"
-                  defaultValue={day.wakeLocationName}
-                  placeholder="e.g. Seattle, WA"
-                  className="input"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-stone-600">Sleep in</span>
-                <AddressAutocomplete
-                  name="sleepLocationName"
-                  defaultValue={day.sleepLocationName}
-                  placeholder="e.g. Victoria, BC"
-                  className="input"
-                />
-              </label>
-              <button type="submit" className="btn-secondary col-span-2 justify-self-start">
-                Save
-              </button>
-            </form>
-          </div>
-
-          <div>
-            <p className="mb-2 text-xs font-medium text-stone-500">Tour destinations</p>
-            {waypoints.length > 0 && (
-              <ul className="mb-2 space-y-1">
-                {waypoints.map((w, i) => (
-                  <li key={w.id} className="flex items-center justify-between gap-2 text-sm text-stone-700">
-                    <span>
-                      {i + 1}. {w.name}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-1 text-xs">
-                      <form action={moveWaypointAction.bind(null, tripId, w.id, "up")}>
-                        <button
-                          type="submit"
-                          aria-label="Move earlier"
-                          className="px-1 text-stone-400 hover:text-stone-700"
-                        >
-                          ↑
-                        </button>
-                      </form>
-                      <form action={moveWaypointAction.bind(null, tripId, w.id, "down")}>
-                        <button
-                          type="submit"
-                          aria-label="Move later"
-                          className="px-1 text-stone-400 hover:text-stone-700"
-                        >
-                          ↓
-                        </button>
-                      </form>
-                      <form action={removeWaypointAction.bind(null, tripId, w.id)}>
-                        <button type="submit" className="px-1 text-red-500 underline">
-                          Remove
-                        </button>
-                      </form>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <form action={addWaypointAction.bind(null, tripId, day.id)} className="flex gap-2">
-              <AddressAutocomplete
-                name="name"
-                placeholder="Add a stop (e.g. lunch in Ennis)"
-                className="input"
-              />
-              <button type="submit" className="btn-secondary shrink-0">
-                Add stop
-              </button>
-            </form>
-          </div>
+          <LocationKindSection
+            tripId={tripId}
+            dayId={day.id}
+            kind="wake"
+            label="Wake locations"
+            placeholder="e.g. Bethlehem, PA"
+            locations={wakes}
+            locationMembers={locationMembers}
+            members={members}
+          />
+          <LocationKindSection
+            tripId={tripId}
+            dayId={day.id}
+            kind="sleep"
+            label="Sleep locations"
+            placeholder="e.g. Galway, Ireland"
+            locations={sleeps}
+            locationMembers={locationMembers}
+            members={members}
+          />
+          <LocationKindSection
+            tripId={tripId}
+            dayId={day.id}
+            kind="stop"
+            label="Stops"
+            placeholder="Add a stop (e.g. lunch in Ennis)"
+            locations={stops}
+            locationMembers={locationMembers}
+            members={members}
+          />
         </div>
       )}
 

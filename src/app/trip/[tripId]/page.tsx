@@ -12,7 +12,7 @@ import DaysSection from "./DaysSection.tsx";
 import { ItemList } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
-import { listDays, waypointsForDays } from "@/lib/days.ts";
+import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
 
 /** Groups items by dayId, each day's list sorted by its manual/chronological draft order. Items with no dayId are dropped -- callers that want those want listItems' own status filters instead. */
 function groupByDay(items: Item[]): Map<string, Item[]> {
@@ -64,7 +64,9 @@ export default async function TripPage({
   const dietaryFindings = await dietaryWarningsForViewer(access);
 
   const days = await listDays(access);
-  const waypointsByDay = await waypointsForDays(days.map((d) => d.id));
+  const locationsByDay = await locationsForDays(days.map((d) => d.id));
+  const allLocationIds = [...locationsByDay.values()].flat().map((l) => l.id);
+  const locationMembers = await locationMembersForLocations(allLocationIds);
 
   const origin = await absoluteOrigin();
 
@@ -132,11 +134,13 @@ export default async function TripPage({
         <DaysSection
           tripId={tripId}
           days={days}
-          waypointsByDay={waypointsByDay}
+          locationsByDay={locationsByDay}
+          locationMembers={locationMembers}
           itemsByDay={itemsByDay}
           timezone={access.trip.timezone}
           destination={access.trip.destination}
           members={access.members}
+          viewerId={access.viewer.id}
         />
       </Section>
 
