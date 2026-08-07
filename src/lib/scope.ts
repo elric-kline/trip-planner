@@ -36,8 +36,14 @@ export type TripAccess = {
 };
 
 export class AccessError extends Error {
-  constructor(readonly kind: "NOT_FOUND" | "FORBIDDEN", message?: string) {
+  // Not a constructor parameter property (`readonly kind: ...` inline) --
+  // that TS shorthand needs a type-aware transform to erase, which breaks
+  // under plain `node --experimental-strip-types` (strip-only mode, no type
+  // info). Spelling it out keeps this file importable directly by tests.
+  readonly kind: "NOT_FOUND" | "FORBIDDEN";
+  constructor(kind: "NOT_FOUND" | "FORBIDDEN", message?: string) {
     super(message ?? kind);
+    this.kind = kind;
   }
 }
 

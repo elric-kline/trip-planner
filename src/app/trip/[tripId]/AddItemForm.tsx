@@ -117,7 +117,7 @@ export default function AddItemForm({
         />
       </div>
       <p className="text-xs text-stone-400">
-        We'll look up coordinates from the location automatically — that's what lets the conflict checker estimate travel time between stops.
+        We&apos;ll look up coordinates from the location automatically — that&apos;s what lets the conflict checker estimate travel time between stops.
       </p>
       <textarea name="notes" placeholder="Notes (optional)" className="input" rows={2} />
 

@@ -37,7 +37,7 @@ export default async function LoginPage({
 
       <div className="my-6 flex items-center gap-3 text-xs text-stone-400">
         <div className="h-px flex-1 bg-stone-200" />
-        or, if you've set one
+        or, if you&apos;ve set one
         <div className="h-px flex-1 bg-stone-200" />
       </div>
 

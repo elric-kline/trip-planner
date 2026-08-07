@@ -12,7 +12,7 @@ export default async function HomePage() {
       </h1>
       <p className="mt-4 text-stone-600">
         Pitch ideas, vote, and lock in an itinerary together — then keep it as a
-        shared journal once you're there.
+        shared journal once you&apos;re there.
       </p>
       <a href="/login" className="btn-primary mt-8 inline-block">
         Sign in

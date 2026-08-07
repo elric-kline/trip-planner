@@ -323,7 +323,7 @@ export default async function ItemPage({
       {item.status === "locked" && (
         <section className="rounded-md border border-stone-200 bg-white p-4">
           <h2 className="mb-2 text-sm font-semibold text-stone-700">
-            Who's {item.commitment === "required" ? "on this" : "in"}
+            Who&apos;s {item.commitment === "required" ? "on this" : "in"}
           </h2>
           {item.visibility === "private" ? (
             <p className="text-sm text-stone-500">Just you.</p>
