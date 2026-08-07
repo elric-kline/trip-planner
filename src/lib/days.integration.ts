@@ -3,16 +3,20 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { tripDays } from "@/db/schema";
+import { tripDays, users } from "@/db/schema";
 import {
   addLocation,
+  addLocationForSelf,
+  autoIncludeSoleLocations,
   ensureDaysSeeded,
+  joinLocation,
   listDays,
   locationMembersForLocations,
   locationsForDays,
   moveLocation,
   removeLocation,
   setLocationMembers,
+  unresolvedBranchesForMember,
 } from "./days.ts";
 import { RuleError } from "./items.ts";
 import { requireTripAccess } from "./scope.ts";
@@ -287,4 +291,97 @@ test("setLocationMembers rejects a location id that doesn't belong to this trip"
 
 test("locationMembersForLocations([]) returns an empty map without querying", async () => {
   assert.deepEqual(await locationMembersForLocations([]), new Map());
+});
+
+test("autoIncludeSoleLocations adds a member to every group with no real choice, and leaves branches (2+) alone", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  const soleWake = await addLocation(ownerAccess, day.id, "wake", { name: "Seattle, WA" });
+  const branchA = await addLocation(ownerAccess, day.id, "sleep", { name: "Victoria, BC" });
+  const branchB = await addLocation(ownerAccess, day.id, "sleep", { name: "Vancouver, BC" });
+  // Both branch locations start with only the owner (narrow them down, as
+  // if the owner had already resolved their own leg).
+  await setLocationMembers(ownerAccess, branchA.id, [owner.id]);
+  await setLocationMembers(ownerAccess, branchB.id, [owner.id]);
+
+  const newcomer = await createTestUser();
+  t.after(() => db.delete(users).where(eq(users.id, newcomer.id)));
+  await addTripMember(trip.id, newcomer.id, "participant");
+  await autoIncludeSoleLocations(trip.id, newcomer.id);
+
+  const members = await locationMembersForLocations([soleWake.id, branchA.id, branchB.id]);
+  assert.ok(members.get(soleWake.id)?.includes(newcomer.id), "added to the sole wake location");
+  assert.ok(!members.get(branchA.id)?.includes(newcomer.id), "NOT added to either branch");
+  assert.ok(!members.get(branchB.id)?.includes(newcomer.id), "NOT added to either branch");
+
+  // Idempotent -- calling it again doesn't error or duplicate.
+  await autoIncludeSoleLocations(trip.id, newcomer.id);
+  const membersAgain = await locationMembersForLocations([soleWake.id]);
+  assert.deepEqual(membersAgain.get(soleWake.id)?.filter((id) => id === newcomer.id), [newcomer.id]);
+});
+
+test("unresolvedBranchesForMember only lists groups with 2+ locations the member isn't in any of", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  await addLocation(ownerAccess, day.id, "wake", { name: "Only one wake -- not a branch" });
+  const legA = await addLocation(ownerAccess, day.id, "sleep", { name: "Leg A" });
+  const legB = await addLocation(ownerAccess, day.id, "sleep", { name: "Leg B" });
+  await setLocationMembers(ownerAccess, legA.id, [owner.id]);
+  await setLocationMembers(ownerAccess, legB.id, []);
+
+  // Not part of either leg yet -- this is a real branch for them.
+  const branches = await unresolvedBranchesForMember(trip.id, participant.id);
+  assert.equal(branches.length, 1);
+  assert.equal(branches[0].kind, "sleep");
+  assert.equal(branches[0].date, "2026-09-01");
+  assert.deepEqual(new Set(branches[0].locations.map((l) => l.name)), new Set(["Leg A", "Leg B"]));
+
+  // Once they're in ONE of the branch's locations, it's no longer unresolved for them.
+  await setLocationMembers(ownerAccess, legA.id, [owner.id, participant.id]);
+  const resolved = await unresolvedBranchesForMember(trip.id, participant.id);
+  assert.deepEqual(resolved, []);
+});
+
+test("joinLocation adds the viewer without disturbing who else is already in it; rejects a location from another trip", async (t) => {
+  const { trip, owner, participant, ownerAccess, participantAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+
+  const legA = await addLocation(ownerAccess, day.id, "wake", { name: "Leg A" });
+  await setLocationMembers(ownerAccess, legA.id, [owner.id]);
+
+  await joinLocation(participantAccess, legA.id);
+  const members = await locationMembersForLocations([legA.id]);
+  assert.deepEqual(new Set(members.get(legA.id)), new Set([owner.id, participant.id]));
+
+  const otherTrip = await createTestTrip(owner, { startDate: "2026-10-01", endDate: "2026-10-01" });
+  // otherTrip first -- it's also owned by `owner`, and trips.createdBy has
+  // no cascade, so the owner can't be deleted while it still exists.
+  t.after(() => cleanupTrip(otherTrip.id, []).then(() => cleanupTrip(trip.id, [owner.id, participant.id])));
+  const otherAccess = await requireTripAccess(otherTrip.id, owner);
+  const [otherDay] = await listDays(otherAccess);
+  const locationOnOtherTrip = await addLocation(otherAccess, otherDay.id, "wake", { name: "Belongs to another trip" });
+
+  await assert.rejects(() => joinLocation(participantAccess, locationOnOtherTrip.id), RuleError);
+});
+
+test("addLocationForSelf creates a location included for the viewer alone, not every trip member", async (t) => {
+  const { trip, owner, participant, participantAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  const created = await addLocationForSelf(participantAccess, day.id, "wake", { name: "My own leg" });
+  const members = await locationMembersForLocations([created.id]);
+  assert.deepEqual(members.get(created.id), [participant.id], "only the person who started this branch is in it");
 });

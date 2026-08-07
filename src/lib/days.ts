@@ -215,3 +215,110 @@ export async function setLocationMembers(access: TripAccess, locationId: string,
     await db.insert(tripDayLocationMembers).values(included.map((userId) => ({ locationId, userId })));
   }
 }
+
+/** All of a trip's locations, grouped by (dayId, kind) -- the unit a "branch" is measured over. Internal: callers want either autoIncludeSoleLocations or unresolvedBranchesForMember below, not the raw grouping. */
+async function locationGroupsByDayAndKind(tripId: string): Promise<Map<string, TripDayLocation[]>> {
+  const days = await db.select({ id: tripDays.id }).from(tripDays).where(eq(tripDays.tripId, tripId));
+  const dayIds = days.map((d) => d.id);
+  if (dayIds.length === 0) return new Map();
+
+  const rows = await db.select().from(tripDayLocations).where(inArray(tripDayLocations.dayId, dayIds));
+  const grouped = new Map<string, TripDayLocation[]>();
+  for (const row of rows) {
+    const key = `${row.dayId}:${row.kind}`;
+    const group = grouped.get(key) ?? [];
+    group.push(row);
+    grouped.set(key, group);
+  }
+  return grouped;
+}
+
+/**
+ * Onboards a newly-invited member into whatever the trip has already
+ * planned, for the parts that aren't actually in question: any (day, kind)
+ * group with zero or one location has nothing to choose between, so the
+ * new member is simply added to it, same as if they'd been there when it
+ * was created. Called once, right when they accept the invite (see
+ * trips.ts's acceptInvite) -- groups with two or more locations are left
+ * alone; see unresolvedBranchesForMember for those.
+ */
+export async function autoIncludeSoleLocations(tripId: string, userId: string): Promise<void> {
+  const groups = await locationGroupsByDayAndKind(tripId);
+  const soleLocationIds = [...groups.values()].filter((g) => g.length === 1).map((g) => g[0].id);
+  if (soleLocationIds.length === 0) return;
+
+  await db
+    .insert(tripDayLocationMembers)
+    .values(soleLocationIds.map((locationId) => ({ locationId, userId })))
+    .onConflictDoNothing();
+}
+
+export type LocationBranch = {
+  dayId: string;
+  date: string;
+  kind: DayLocationKind;
+  locations: TripDayLocation[];
+};
+
+/**
+ * The (day, kind) groups that genuinely need a decision from this member:
+ * two or more locations already exist (a split day -- see schema.ts's
+ * tripDayLocationMembers for the Bethlehem/NYC example) and they aren't in
+ * any of them yet. This is what a "join the trip" mini-wizard walks
+ * through -- see the /trip/[tripId]/join page. A group they're already in
+ * (e.g. resolved on an earlier visit, or added manually via the pencil
+ * editor) is left out; there's nothing left to ask.
+ */
+export async function unresolvedBranchesForMember(tripId: string, userId: string): Promise<LocationBranch[]> {
+  const groups = await locationGroupsByDayAndKind(tripId);
+  const branchGroups = [...groups.entries()].filter(([, locations]) => locations.length > 1);
+  if (branchGroups.length === 0) return [];
+
+  const allLocationIds = branchGroups.flatMap(([, locations]) => locations.map((l) => l.id));
+  const membersByLocation = await locationMembersForLocations(allLocationIds);
+
+  const dayIds = [...new Set(branchGroups.flatMap(([, locations]) => locations.map((l) => l.dayId)))];
+  const days = await db.select().from(tripDays).where(inArray(tripDays.id, dayIds));
+  const dateByDayId = new Map(days.map((d) => [d.id, d.date]));
+
+  const branches: LocationBranch[] = [];
+  for (const [, locations] of branchGroups) {
+    const alreadyIn = locations.some((l) => (membersByLocation.get(l.id) ?? []).includes(userId));
+    if (alreadyIn) continue;
+    branches.push({
+      dayId: locations[0].dayId,
+      date: dateByDayId.get(locations[0].dayId) ?? "",
+      kind: locations[0].kind,
+      locations,
+    });
+  }
+  return branches.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
+}
+
+/** Adds the viewer to an existing location -- the "I'm with this one" choice in the join wizard. Additive: doesn't touch who else is already in it. */
+export async function joinLocation(access: TripAccess, locationId: string): Promise<void> {
+  await getLocation(access, locationId);
+  await db
+    .insert(tripDayLocationMembers)
+    .values({ locationId, userId: access.viewer.id })
+    .onConflictDoNothing();
+}
+
+/**
+ * Starts a brand new branch for just the viewer -- the "neither, I'm doing
+ * my own thing" choice in the join wizard. Reuses addLocation (which
+ * defaults to including every current trip member, right for the normal
+ * "a planner adds a location" case) and then immediately narrows it down
+ * to the viewer alone, since a fresh branch started this way is what
+ * defines *their* leg, not everyone's.
+ */
+export async function addLocationForSelf(
+  access: TripAccess,
+  dayId: string,
+  kind: DayLocationKind,
+  input: { name: string; lat?: number | null; lng?: number | null },
+): Promise<TripDayLocation> {
+  const created = await addLocation(access, dayId, kind, input);
+  await setLocationMembers(access, created.id, [access.viewer.id]);
+  return created;
+}
