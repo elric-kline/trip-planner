@@ -136,6 +136,13 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
   // the "Location" field (a future restaurant-search step fills it in).
   const coords = await geocode(lodging?.address ?? locationName);
 
+  // Present only when this form was opened from a day's own "+ Add" slot
+  // (see DayItemBuilder.tsx) -- the trip-wide "Add something" form at the
+  // bottom of the page has neither, and creates an ungrounded idea same as
+  // always.
+  const dayId = String(formData.get("dayId") ?? "") || null;
+  const afterItemId = String(formData.get("afterItemId") ?? "") || undefined;
+
   try {
     const created = await createItem(access, {
       title: String(formData.get("title") ?? ""),
@@ -147,6 +154,8 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
       visibility: formData.get("private") === "on" ? "private" : "group",
       startsAt: localInputToDate(formData.get("startsAt"), access.trip.timezone),
       endsAt: localInputToDate(formData.get("endsAt"), access.trip.timezone),
+      dayId,
+      afterItemId,
     });
 
     if (lodging && hasAnyValue(lodging)) {

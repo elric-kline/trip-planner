@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { diningDetails, itemRsvps, items, lodgingDetails } from "@/db/schema";
 import {
@@ -15,6 +15,8 @@ import {
   type Commitment,
 } from "./lifecycle.ts";
 import { canEditItem, getItem, type Item, type TripAccess } from "./scope.ts";
+import { getDay, getDayByDate } from "./days.ts";
+import { calendarDateInZone } from "./time.ts";
 
 export class RuleError extends Error {}
 
@@ -39,7 +41,127 @@ export type CreateItemInput = {
   visibility?: Item["visibility"];
   startsAt?: Date | null;
   endsAt?: Date | null;
+  /** Explicit day placement, from the day-scoped "+ Add" UI. Omitted for the trip-wide "Add something" form, which creates an ungrounded idea. */
+  dayId?: string | null;
+  /** Manual insertion point within dayId's draft order — omitted appends to the end. Ignored once startsAt is given; see placeInDay. */
+  afterItemId?: string;
 };
+
+/**
+ * Where a day-linked (or about-to-be) item sits: which day, and its
+ * dayPosition within that day's draft order.
+ *
+ * A startsAt, once known, is always the authority on order — manual
+ * placement (dayId/afterItemId) only decides where an untimed item lands.
+ * That's what lets "+ Add" between two items build a rough draft before
+ * anyone commits to exact times, while a proposal that does get a time
+ * still settles into its correct chronological spot automatically. See
+ * chronoPositionInDay and computeDayPosition below for the two halves of
+ * that split.
+ */
+async function placeInDay(
+  access: TripAccess,
+  opts: {
+    existingDayId?: string | null;
+    requestedDayId?: string | null;
+    afterItemId?: string;
+    startsAt?: Date | null;
+    excludeItemId?: string;
+  },
+): Promise<{ dayId: string | null; dayPosition: number | null }> {
+  let dayId = opts.existingDayId ?? opts.requestedDayId ?? null;
+  if (dayId) await getDay(access, dayId); // throws if it isn't really one of this trip's own days
+
+  // No day chosen yet -- ground it automatically if its time lands on one
+  // of the trip's own dates. An item that's neither given a day nor a time
+  // stays a fully ungrounded idea.
+  if (!dayId && opts.startsAt) {
+    const day = await getDayByDate(access.trip.id, calendarDateInZone(opts.startsAt, access.trip.timezone));
+    dayId = day?.id ?? null;
+  }
+  if (!dayId) return { dayId: null, dayPosition: null };
+
+  if (opts.startsAt) {
+    const resnapped = await chronoPositionInDay(dayId, opts.startsAt, opts.excludeItemId);
+    if (resnapped !== null) return { dayId, dayPosition: resnapped };
+  }
+  return { dayId, dayPosition: await computeDayPosition(dayId, opts.afterItemId) };
+}
+
+/**
+ * Appends to the end of dayId's draft, or -- if afterItemId is given --
+ * slots in immediately after that item. Fractional-index midpoint
+ * insertion (same idea as tripDayWaypoints.position, but shifting no other
+ * row on an insert-between, at the cost of needing an occasional
+ * renormalization pass this app doesn't yet have -- not a concern at the
+ * scale of one trip's worth of manual inserts).
+ */
+async function computeDayPosition(dayId: string, afterItemId?: string): Promise<number> {
+  const siblings = await db
+    .select({ id: items.id, dayPosition: items.dayPosition })
+    .from(items)
+    .where(eq(items.dayId, dayId))
+    .orderBy(asc(items.dayPosition));
+
+  // The empty-day shortcut only applies to a plain append -- an
+  // afterItemId naming an item that isn't there (including "there are no
+  // items at all yet") is always a mistake to report, not something to
+  // silently normalize into position 0.
+  if (afterItemId === undefined) {
+    return siblings.length === 0 ? 0 : (siblings[siblings.length - 1].dayPosition ?? 0) + 1;
+  }
+
+  const idx = siblings.findIndex((s) => s.id === afterItemId);
+  if (idx === -1) throw new RuleError("Can't insert after an item that isn't in this day.");
+  const after = siblings[idx].dayPosition ?? 0;
+  // dayPosition is nullable in the column type but always set in practice
+  // for a day-linked row; `?? undefined` just collapses that theoretical
+  // null into the same "nothing to bound against" case as no next sibling.
+  const next = siblings[idx + 1]?.dayPosition ?? undefined;
+  return next === undefined ? after + 1 : (after + next) / 2;
+}
+
+/**
+ * Where startsAt would chronologically slot among dayId's other *timed*
+ * items, as a dayPosition midpoint between its would-be neighbors — or
+ * null if there's nothing timed yet to compare against, in which case the
+ * caller falls back to manual placement (computeDayPosition). An untimed
+ * sibling's own position is never used as a bound, only as filler that
+ * ends up between whichever timed neighbors bracket it.
+ */
+async function chronoPositionInDay(
+  dayId: string,
+  startsAt: Date,
+  excludeItemId?: string,
+): Promise<number | null> {
+  const filters = [eq(items.dayId, dayId)];
+  if (excludeItemId) filters.push(ne(items.id, excludeItemId));
+
+  const siblings = await db
+    .select({ dayPosition: items.dayPosition, startsAt: items.startsAt })
+    .from(items)
+    .where(and(...filters))
+    .orderBy(asc(items.dayPosition));
+
+  const timed = siblings.filter(
+    (s): s is { dayPosition: number; startsAt: Date } => s.startsAt != null && s.dayPosition != null,
+  );
+  if (timed.length === 0) return null;
+
+  let before: { dayPosition: number; startsAt: Date } | undefined;
+  let after: { dayPosition: number; startsAt: Date } | undefined;
+  for (const s of timed) {
+    if (s.startsAt <= startsAt) before = s;
+    else {
+      after = s;
+      break;
+    }
+  }
+
+  const lower = before?.dayPosition ?? (after ? after.dayPosition - 1 : 0);
+  const upper = after?.dayPosition ?? (before ? before.dayPosition + 1 : 1);
+  return (lower + upper) / 2;
+}
 
 /**
  * Everything enters the system here, as an idea. Supplying a time creates it
@@ -53,6 +175,12 @@ export async function createItem(
   if (!title) throw new RuleError("Give the item a title.");
   if (input.endsAt && input.startsAt && input.startsAt >= input.endsAt)
     throw new RuleError("The end time must come after the start time.");
+
+  const { dayId, dayPosition } = await placeInDay(access, {
+    requestedDayId: input.dayId,
+    afterItemId: input.afterItemId,
+    startsAt: input.startsAt,
+  });
 
   const [created] = await db
     .insert(items)
@@ -68,6 +196,8 @@ export async function createItem(
       visibility: input.visibility ?? "group",
       startsAt: input.startsAt ?? null,
       endsAt: input.endsAt ?? null,
+      dayId,
+      dayPosition,
       status: statusForTime(input.startsAt ?? null),
     })
     .returning();
@@ -117,7 +247,13 @@ export async function updateItemDetails(
   return updated;
 }
 
-/** idea → proposed, or moves an existing proposal to a different time. */
+/**
+ * idea → proposed, or moves an existing proposal to a different time. An
+ * item that wasn't already linked to a day (a pure idea) gets auto-grounded
+ * here if the new time lands on one of the trip's own dates — see
+ * placeInDay. An item already linked to a day stays on that day even if
+ * the new time's date disagrees; the planner put it there on purpose.
+ */
 export async function scheduleItem(
   access: TripAccess,
   itemId: string,
@@ -129,9 +265,26 @@ export async function scheduleItem(
   if (endsAt && startsAt >= endsAt)
     throw new RuleError("The end time must come after the start time.");
 
+  let dayId = item.dayId;
+  let dayPosition = item.dayPosition;
+
+  if (!dayId) {
+    // Not on a day yet -- ground it now if the new time falls on one of
+    // the trip's own dates (see placeInDay).
+    const placed = await placeInDay(access, { startsAt });
+    dayId = placed.dayId;
+    dayPosition = placed.dayPosition;
+  } else {
+    // Already on a day the planner chose -- a time still governs its order
+    // among that day's other timed items; with nothing timed yet to
+    // compare against, its manual position is left exactly where it was.
+    const resnapped = await chronoPositionInDay(dayId, startsAt, itemId);
+    if (resnapped !== null) dayPosition = resnapped;
+  }
+
   const [updated] = await db
     .update(items)
-    .set({ startsAt, endsAt, status: "proposed", ...touch })
+    .set({ startsAt, endsAt, status: "proposed", dayId, dayPosition, ...touch })
     .where(eq(items.id, itemId))
     .returning();
 

@@ -43,6 +43,13 @@
       "when": 1786068475626,
       "tag": "0005_magical_morlocks",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786070608838,
+      "tag": "0006_stiff_ezekiel_stane",
+      "breakpoints": true
     }
   ]
 }

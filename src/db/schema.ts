@@ -142,10 +142,13 @@ export const trips = pgTable("trips", {
 /**
  * One row per calendar date of the trip (seeded when the trip is created --
  * see lib/trips.ts's createTrip) -- a fixed 1:1 relationship to the trip's
- * date span, not something the planner adds piecemeal. That's what lets an
- * item find its own day just by date (no separate linking column needed)
- * and makes a gap in the plan ("Day 4 has no lodging yet") visible without
- * extra bookkeeping.
+ * date span, not something the planner adds piecemeal. That makes a gap in
+ * the plan ("Day 4 has no lodging yet") visible without extra bookkeeping.
+ *
+ * Items link here explicitly via items.dayId (see below), not implicitly
+ * by matching calendar dates -- an item can be dropped into a day's draft
+ * before it has a startsAt at all (see items.dayPosition), so there isn't
+ * always a date to match on.
  *
  * Wake/sleep are deliberately independent free-text-plus-geocoded fields,
  * not derived from a lodging item's check-in/check-out — a multi-city trip
@@ -261,6 +264,26 @@ export const items = pgTable(
     locationLat: doublePrecision("location_lat"),
     locationLng: doublePrecision("location_lng"),
 
+    /**
+     * Which of the trip's days this item has been drafted into -- null for
+     * an ungrounded idea. Set explicitly (the day-scoped "+ Add" UI) or
+     * automatically the moment the item gets a startsAt that lands on one
+     * of the trip's own dates (see items.ts's placeInDay). "set null" on
+     * delete rather than cascading: losing the day shouldn't destroy the
+     * item, just unground it back to an idea.
+     */
+    dayId: uuid("day_id").references(() => tripDays.id, { onDelete: "set null" }),
+    /**
+     * Manual order within dayId's draft -- null when dayId is null. Once
+     * startsAt is set, this gets resnapped to reflect chronological order
+     * among the day's other timed items (see chronoPositionInDay); until
+     * then it's purely "where the planner dropped it," maintained via
+     * fractional-index midpoint insertion, same technique as
+     * tripDayWaypoints.position but without needing to shift every later
+     * row on an insert-between.
+     */
+    dayPosition: doublePrecision("day_position"),
+
     status: itemStatus("status").notNull().default("idea"),
     visibility: itemVisibility("visibility").notNull().default("group"),
     /** Null until locked. */
@@ -282,6 +305,7 @@ export const items = pgTable(
     index("items_trip_idx").on(t.tripId),
     index("items_trip_status_idx").on(t.tripId, t.status),
     index("items_starts_at_idx").on(t.startsAt),
+    index("items_day_idx").on(t.dayId),
   ],
 );
 

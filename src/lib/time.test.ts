@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  calendarDateInZone,
   eachCalendarDate,
   formatCalendarDate,
   formatTripDateRange,
@@ -97,4 +98,11 @@ test("eachCalendarDate rejects an end date before the start date", () => {
 
 test("formatCalendarDate reads 'Wed, Sep 2', the weekday computed without any local-zone drift", () => {
   assert.equal(formatCalendarDate("2026-09-02"), "Wed, Sep 2");
+});
+
+test("calendarDateInZone reads the date the destination's own clock would show, not UTC's", () => {
+  // 01:00 UTC on the 12th is still 18:00 on the 11th in Los Angeles (UTC-7 in July).
+  const instant = new Date("2026-07-12T01:00:00Z");
+  assert.equal(calendarDateInZone(instant, "America/Los_Angeles"), "2026-07-11");
+  assert.equal(calendarDateInZone(instant, "UTC"), "2026-07-12");
 });

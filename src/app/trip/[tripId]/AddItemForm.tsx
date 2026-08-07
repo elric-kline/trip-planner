@@ -40,10 +40,19 @@ export default function AddItemForm({
   tripId,
   destination,
   members,
+  dayId,
+  afterItemId,
+  onCancel,
 }: {
   tripId: string;
   destination: string;
   members: TripMemberSummary[];
+  /** Set when opened from a day's own "+ Add" slot (see DayItemBuilder.tsx) -- omitted for the trip-wide "Add something" form, which creates an ungrounded idea same as always. */
+  dayId?: string;
+  /** Where in that day's draft order to insert -- omitted appends to the end. Ignored once the item gets a startsAt, which always governs order instead. */
+  afterItemId?: string;
+  /** Shown next to Add only for the compact, day-scoped form -- the standalone bottom-of-page form has nothing to collapse back into. */
+  onCancel?: () => void;
 }) {
   const [category, setCategory] = useState<Category>("activity");
   const [diningPrefill, setDiningPrefill] = useState<DiningPrefill | null>(null);
@@ -85,6 +94,8 @@ export default function AddItemForm({
 
   return (
     <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
+      {dayId && <input type="hidden" name="dayId" value={dayId} />}
+      {afterItemId && <input type="hidden" name="afterItemId" value={afterItemId} />}
       <div className="grid grid-cols-2 gap-3">
         <input
           key={`title-${diningPrefill?.version ?? 0}`}
@@ -273,9 +284,16 @@ export default function AddItemForm({
       <label className="flex items-center gap-2 text-sm text-stone-600">
         <input type="checkbox" name="private" /> Keep this private to me
       </label>
-      <button type="submit" className="btn-primary justify-self-start">
-        Add
-      </button>
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn-primary justify-self-start">
+          Add
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="text-sm text-stone-500 hover:text-stone-700">
+            Cancel
+          </button>
+        )}
+      </div>
     </form>
   );
 }
