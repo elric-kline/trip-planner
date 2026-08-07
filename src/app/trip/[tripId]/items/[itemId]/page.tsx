@@ -22,15 +22,14 @@ import {
 import { canLockItem } from "@/lib/scope.ts";
 import { utcToZonedInputValue } from "@/lib/time.ts";
 import AddressAutocomplete from "../../AddressAutocomplete.tsx";
-import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
+import DiningEditForm from "../../DiningEditForm.tsx";
+import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 const PAYMENT_STATUS_LABEL = {
   prepaid: "Prepaid",
   partial: "Partially paid",
   pay_on_arrival: "Pay on arrival",
 } as const;
-
-const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
 
 export default async function ItemPage({
   params,
@@ -274,89 +273,13 @@ export default async function ItemPage({
           <h2 className="mb-2 text-sm font-semibold text-stone-700">Dining details</h2>
 
           {diningEditable ? (
-            <form
+            <DiningEditForm
               action={updateDiningDetailsAction.bind(null, tripId, itemId)}
-              className="grid gap-3"
-            >
-              <input
-                name="cuisine"
-                defaultValue={dining?.cuisine ?? ""}
-                placeholder="Cuisine (e.g. Neapolitan pizza)"
-                className="input"
-              />
-              <div>
-                <p className="mb-1 text-xs text-stone-500">Accommodates</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-                  {DIETARY_TAGS.map((tag) => (
-                    <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
-                      <input
-                        type="checkbox"
-                        name="accommodates"
-                        value={tag}
-                        defaultChecked={dining?.accommodates?.includes(tag) ?? false}
-                      />
-                      {DIETARY_TAG_LABEL[tag]}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <input
-                  name="partySize"
-                  type="number"
-                  min={1}
-                  step={1}
-                  defaultValue={dining?.partySize ?? ""}
-                  placeholder="Party size"
-                  className="input"
-                />
-                <select name="priceRange" defaultValue={dining?.priceRange ?? ""} className="input">
-                  <option value="">Price</option>
-                  {PRICE_RANGES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  name="contactPhone"
-                  defaultValue={dining?.contactPhone ?? ""}
-                  placeholder="Restaurant phone"
-                  className="input"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  name="confirmationNumber"
-                  defaultValue={dining?.confirmationNumber ?? ""}
-                  placeholder="Confirmation number"
-                  className="input"
-                />
-                <select name="reservedBy" defaultValue={dining?.reservedBy ?? ""} className="input">
-                  <option value="">Reserved under (optional)</option>
-                  {access.members.map((m) => (
-                    <option key={m.userId} value={m.userId}>
-                      {m.name ?? m.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <input
-                name="reservationUrl"
-                type="url"
-                defaultValue={dining?.reservationUrl ?? ""}
-                placeholder="Reservation link (optional)"
-                className="input"
-              />
-              <textarea
-                name="specialRequests"
-                defaultValue={dining?.specialRequests ?? ""}
-                placeholder="Special requests (optional) — high chair, occasion, etc."
-                className="input"
-                rows={2}
-              />
-              <button className="btn-secondary justify-self-start">Save dining details</button>
-            </form>
+              itemTitle={item.title}
+              destination={access.trip.destination}
+              dining={dining}
+              members={access.members}
+            />
           ) : (
             dining && (
               <dl className="space-y-1.5 text-sm text-stone-700">

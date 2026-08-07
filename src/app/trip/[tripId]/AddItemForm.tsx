@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createItemAction } from "./actions.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import RestaurantSearch, { type PlaceDetails } from "./RestaurantSearch.tsx";
+import CuisineLookupButton, { type CuisineResult } from "./CuisineLookupButton.tsx";
 import type { TripMemberSummary } from "@/lib/scope.ts";
-import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
+import { DIETARY_TAGS, DIETARY_TAG_LABEL, type DietaryTag } from "@/lib/dietary.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
 const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
@@ -18,6 +19,8 @@ type DiningPrefill = {
   reservationUrl: string;
   priceRange: "" | (typeof PRICE_RANGES)[number];
   placeId: string;
+  cuisine: string;
+  accommodates: DietaryTag[];
 };
 
 /** Google's price_level is 0 (free) - 4 (very expensive); 1-4 map onto our $-$$$$ scale, 0/missing stays unset. */
@@ -44,6 +47,8 @@ export default function AddItemForm({
 }) {
   const [category, setCategory] = useState<Category>("activity");
   const [diningPrefill, setDiningPrefill] = useState<DiningPrefill | null>(null);
+  const [titleHasValue, setTitleHasValue] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
   const isLodging = category === "lodging";
   const isDining = category === "dining";
 
@@ -56,6 +61,25 @@ export default function AddItemForm({
       reservationUrl: details.website ?? "",
       priceRange: priceRangeFromLevel(details.priceLevel),
       placeId,
+      // A new match supersedes any earlier cuisine/dietary guess -- don't
+      // carry stale info from a different restaurant into this one.
+      cuisine: "",
+      accommodates: [],
+    }));
+    setTitleHasValue(Boolean(details.name));
+  }
+
+  function onCuisineResult(result: CuisineResult) {
+    setDiningPrefill((prev) => ({
+      version: (prev?.version ?? 0) + 1,
+      title: prev?.title ?? titleRef.current?.value ?? "",
+      locationName: prev?.locationName ?? "",
+      contactPhone: prev?.contactPhone ?? "",
+      reservationUrl: prev?.reservationUrl ?? "",
+      priceRange: prev?.priceRange ?? "",
+      placeId: prev?.placeId ?? "",
+      cuisine: result.cuisine ?? "",
+      accommodates: result.accommodates,
     }));
   }
 
@@ -64,9 +88,11 @@ export default function AddItemForm({
       <div className="grid grid-cols-2 gap-3">
         <input
           key={`title-${diningPrefill?.version ?? 0}`}
+          ref={titleRef}
           name="title"
           required
           defaultValue={diningPrefill?.title ?? ""}
+          onChange={(e) => setTitleHasValue(e.target.value.trim().length > 0)}
           placeholder="Title"
           className="input col-span-2"
         />
@@ -146,7 +172,7 @@ export default function AddItemForm({
           <RestaurantSearch destination={destination} onConfirm={onRestaurantConfirmed} />
           <p className="-mt-2 text-xs text-stone-400">
             Confirming a match fills in the title, location, phone, price, and reservation link below — review
-            and adjust before saving. Cuisine and accommodations still need a human's judgment for now.
+            and adjust before saving.
           </p>
           <input
             key={`placeId-${diningPrefill?.version ?? 0}`}
@@ -154,13 +180,30 @@ export default function AddItemForm({
             name="placeId"
             defaultValue={diningPrefill?.placeId ?? ""}
           />
-          <input name="cuisine" placeholder="Cuisine (e.g. Neapolitan pizza)" className="input" />
-          <div>
+          <CuisineLookupButton
+            nameRef={titleRef}
+            address={diningPrefill?.locationName ?? null}
+            disabled={!titleHasValue}
+            onResult={onCuisineResult}
+          />
+          <input
+            key={`cuisine-${diningPrefill?.version ?? 0}`}
+            name="cuisine"
+            defaultValue={diningPrefill?.cuisine ?? ""}
+            placeholder="Cuisine (e.g. Neapolitan pizza)"
+            className="input"
+          />
+          <div key={`accommodates-${diningPrefill?.version ?? 0}`}>
             <p className="mb-1 text-xs text-stone-500">Accommodates</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
               {DIETARY_TAGS.map((tag) => (
                 <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
-                  <input type="checkbox" name="accommodates" value={tag} />
+                  <input
+                    type="checkbox"
+                    name="accommodates"
+                    value={tag}
+                    defaultChecked={diningPrefill?.accommodates?.includes(tag) ?? false}
+                  />
                   {DIETARY_TAG_LABEL[tag]}
                 </label>
               ))}
