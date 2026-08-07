@@ -3,9 +3,28 @@
 import { useState } from "react";
 import { createItemAction } from "./actions.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
+import RestaurantSearch, { type PlaceDetails } from "./RestaurantSearch.tsx";
 import type { TripMemberSummary } from "@/lib/scope.ts";
+import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
+const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
+
+type DiningPrefill = {
+  version: number;
+  title: string;
+  locationName: string;
+  contactPhone: string;
+  reservationUrl: string;
+  priceRange: "" | (typeof PRICE_RANGES)[number];
+  placeId: string;
+};
+
+/** Google's price_level is 0 (free) - 4 (very expensive); 1-4 map onto our $-$$$$ scale, 0/missing stays unset. */
+function priceRangeFromLevel(level: number | null): DiningPrefill["priceRange"] {
+  if (level == null || level < 1 || level > 4) return "";
+  return PRICE_RANGES[level - 1];
+}
 
 /**
  * Extension point: as other categories grow their own structured fields
@@ -16,18 +35,41 @@ type Category = "lodging" | "dining" | "activity" | "transport" | "other";
  */
 export default function AddItemForm({
   tripId,
+  destination,
   members,
 }: {
   tripId: string;
+  destination: string;
   members: TripMemberSummary[];
 }) {
   const [category, setCategory] = useState<Category>("activity");
+  const [diningPrefill, setDiningPrefill] = useState<DiningPrefill | null>(null);
   const isLodging = category === "lodging";
+  const isDining = category === "dining";
+
+  function onRestaurantConfirmed(details: PlaceDetails, placeId: string) {
+    setDiningPrefill((prev) => ({
+      version: (prev?.version ?? 0) + 1,
+      title: details.name ?? "",
+      locationName: details.formattedAddress ?? "",
+      contactPhone: details.phone ?? "",
+      reservationUrl: details.website ?? "",
+      priceRange: priceRangeFromLevel(details.priceLevel),
+      placeId,
+    }));
+  }
 
   return (
     <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
       <div className="grid grid-cols-2 gap-3">
-        <input name="title" required placeholder="Title" className="input col-span-2" />
+        <input
+          key={`title-${diningPrefill?.version ?? 0}`}
+          name="title"
+          required
+          defaultValue={diningPrefill?.title ?? ""}
+          placeholder="Title"
+          className="input col-span-2"
+        />
         <select
           name="category"
           className="input"
@@ -40,7 +82,13 @@ export default function AddItemForm({
           <option value="transport">Transport</option>
           <option value="other">Other</option>
         </select>
-        <AddressAutocomplete name="locationName" placeholder="Location (optional)" className="input" />
+        <AddressAutocomplete
+          key={`location-${diningPrefill?.version ?? 0}`}
+          name="locationName"
+          defaultValue={diningPrefill?.locationName}
+          placeholder="Location (optional)"
+          className="input"
+        />
       </div>
       <p className="text-xs text-stone-400">
         We'll look up coordinates from the location automatically — that's what lets the conflict checker estimate travel time between stops.
@@ -89,6 +137,83 @@ export default function AddItemForm({
             <input type="datetime-local" name="cancellationDeadline" className="input" />
           </label>
           <input name="bookingUrl" type="url" placeholder="Booking link (optional)" className="input" />
+        </div>
+      )}
+
+      {isDining && (
+        <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
+          <p className="text-xs font-medium text-stone-500">Dining details (optional — fill in now or later)</p>
+          <RestaurantSearch destination={destination} onConfirm={onRestaurantConfirmed} />
+          <p className="-mt-2 text-xs text-stone-400">
+            Confirming a match fills in the title, location, phone, price, and reservation link below — review
+            and adjust before saving. Cuisine and accommodations still need a human's judgment for now.
+          </p>
+          <input
+            key={`placeId-${diningPrefill?.version ?? 0}`}
+            type="hidden"
+            name="placeId"
+            defaultValue={diningPrefill?.placeId ?? ""}
+          />
+          <input name="cuisine" placeholder="Cuisine (e.g. Neapolitan pizza)" className="input" />
+          <div>
+            <p className="mb-1 text-xs text-stone-500">Accommodates</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+              {DIETARY_TAGS.map((tag) => (
+                <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
+                  <input type="checkbox" name="accommodates" value={tag} />
+                  {DIETARY_TAG_LABEL[tag]}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <input name="partySize" type="number" min={1} step={1} placeholder="Party size" className="input" />
+            <select
+              key={`priceRange-${diningPrefill?.version ?? 0}`}
+              name="priceRange"
+              defaultValue={diningPrefill?.priceRange ?? ""}
+              className="input"
+            >
+              <option value="">Price</option>
+              {PRICE_RANGES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <input
+              key={`contactPhone-${diningPrefill?.version ?? 0}`}
+              name="contactPhone"
+              defaultValue={diningPrefill?.contactPhone ?? ""}
+              placeholder="Restaurant phone"
+              className="input"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
+            <select name="reservedBy" defaultValue="" className="input">
+              <option value="">Reserved under (optional)</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name ?? m.email}
+                </option>
+              ))}
+            </select>
+          </div>
+          <input
+            key={`reservationUrl-${diningPrefill?.version ?? 0}`}
+            name="reservationUrl"
+            type="url"
+            defaultValue={diningPrefill?.reservationUrl ?? ""}
+            placeholder="Reservation link (optional)"
+            className="input"
+          />
+          <textarea
+            name="specialRequests"
+            placeholder="Special requests (optional) — high chair, occasion, etc."
+            className="input"
+            rows={2}
+          />
         </div>
       )}
 

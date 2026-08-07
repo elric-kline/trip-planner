@@ -4,10 +4,12 @@ import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scop
 import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { flagged } from "@/lib/conflicts.ts";
+import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
+import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 function formatItemTime(item: Item, timezone: string): string {
   if (!item.startsAt) return "";
@@ -62,6 +64,7 @@ export default async function TripPage({
   const ideas = items.filter((i) => i.status === "idea");
   const declined = items.filter((i) => i.status === "declined");
   const findings = flagged(await conflictsForViewer(access));
+  const dietaryFindings = await dietaryWarningsForViewer(access);
 
   const origin = await absoluteOrigin();
 
@@ -107,6 +110,24 @@ export default async function TripPage({
         </div>
       )}
 
+      {dietaryFindings.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="mb-2 text-sm font-medium text-amber-900">
+            {dietaryFindings.length} dietary {dietaryFindings.length === 1 ? "mismatch" : "mismatches"} on the
+            itinerary
+          </p>
+          <ul className="space-y-1 text-sm text-amber-800">
+            {dietaryFindings.map((f, i) => (
+              <li key={i}>
+                <strong>{f.itemTitle}</strong> may not work for{" "}
+                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Section title="Itinerary" subtitle="Locked items, in order">
         {locked.length === 0 ? (
           <Empty text="Nothing locked yet." />
@@ -138,16 +159,29 @@ export default async function TripPage({
       )}
 
       <Section title="Add something">
-        <AddItemForm tripId={tripId} members={access.members} />
+        <AddItemForm tripId={tripId} destination={access.trip.destination} members={access.members} />
       </Section>
 
       <Section title="People">
         <ul className="mb-3 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
           {access.members.map((m) => (
-            <li key={m.userId} className="flex items-center justify-between px-4 py-2 text-sm">
-              <span>{m.name ?? m.email}</span>
-              {m.role === "master_planner" && (
-                <span className="badge bg-amber-100 text-amber-800">Planner</span>
+            <li key={m.userId} className="px-4 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span>{m.name ?? m.email}</span>
+                {m.role === "master_planner" && (
+                  <span className="badge bg-amber-100 text-amber-800">Planner</span>
+                )}
+              </div>
+              {(m.dietaryRestrictions?.length || m.dietaryNotes) && (
+                <p className="mt-0.5 text-xs text-stone-500">
+                  🌱{" "}
+                  {[
+                    ...(m.dietaryRestrictions ?? []).map((tag) => DIETARY_TAG_LABEL[tag]),
+                    m.dietaryNotes,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               )}
             </li>
           ))}

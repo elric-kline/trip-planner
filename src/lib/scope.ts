@@ -6,11 +6,17 @@ import { derivePhase, type TripPhase } from "./phase.ts";
 
 export type MemberRole = "master_planner" | "participant";
 
+export type DietaryTag = (typeof users.$inferSelect)["dietaryRestrictions"] extends (infer T)[] | null
+  ? T
+  : never;
+
 export type TripMemberSummary = {
   userId: string;
   email: string;
   name: string | null;
   role: MemberRole;
+  dietaryRestrictions: DietaryTag[] | null;
+  dietaryNotes: string | null;
 };
 
 export type Trip = typeof trips.$inferSelect;
@@ -50,6 +56,8 @@ export async function requireTripAccess(
       email: users.email,
       name: users.name,
       role: tripMembers.role,
+      dietaryRestrictions: users.dietaryRestrictions,
+      dietaryNotes: users.dietaryNotes,
     })
     .from(tripMembers)
     .innerJoin(users, eq(users.id, tripMembers.userId))

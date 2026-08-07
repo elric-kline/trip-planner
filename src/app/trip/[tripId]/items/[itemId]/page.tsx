@@ -4,6 +4,8 @@ import { AccessError, canEditItem, getItem, requireTripAccess } from "@/lib/scop
 import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
 import { checkRsvp, checkUnlock } from "@/lib/lifecycle.ts";
 import { getLodgingDetails } from "@/lib/lodging.ts";
+import { getDiningDetails } from "@/lib/dining.ts";
+import { dietaryWarningsForItem } from "@/lib/dietary-conflicts-for.ts";
 import {
   declineItemAction,
   deleteItemAction,
@@ -15,16 +17,20 @@ import {
   unscheduleItemAction,
   updateItemAction,
   updateLodgingDetailsAction,
+  updateDiningDetailsAction,
 } from "../../actions.ts";
 import { canLockItem } from "@/lib/scope.ts";
 import { utcToZonedInputValue } from "@/lib/time.ts";
 import AddressAutocomplete from "../../AddressAutocomplete.tsx";
+import { DIETARY_TAGS, DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 
 const PAYMENT_STATUS_LABEL = {
   prepaid: "Prepaid",
   partial: "Partially paid",
   pay_on_arrival: "Pay on arrival",
 } as const;
+
+const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
 
 export default async function ItemPage({
   params,
@@ -49,11 +55,14 @@ export default async function ItemPage({
   const myResponse = item.status === "locked" && item.commitment === "optional" ? await myRsvp(access, itemId) : null;
   const editable = canEditItem(access, item);
   const lodging = item.category === "lodging" ? await getLodgingDetails(itemId) : null;
+  const dining = item.category === "dining" ? await getDiningDetails(itemId) : null;
+  const dietaryFindings = dining ? await dietaryWarningsForItem(access, item, dining.accommodates) : [];
   // Booking details are the thing that gets corrected after an item locks
   // (a late confirmation number, a fixed check-in code) — gated on the same
   // rule as the item itself, not the page's extra "not locked" restriction
   // the base title/notes edit form imposes below.
   const lodgingEditable = item.category === "lodging" && editable;
+  const diningEditable = item.category === "dining" && editable;
   const rsvpAllowed = checkRsvp(item).ok;
   const unlockAllowed = checkUnlock(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
 
@@ -236,6 +245,150 @@ export default async function ItemPage({
                     <a href={lodging.bookingUrl} className="text-teal-700 underline break-all">
                       {lodging.bookingUrl}
                     </a>
+                  </Field>
+                )}
+              </dl>
+            )
+          )}
+        </section>
+      )}
+
+      {dietaryFindings.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="mb-2 text-sm font-medium text-amber-900">
+            May not work for {dietaryFindings.length === 1 ? "someone on this" : "everyone on this"}
+          </p>
+          <ul className="space-y-1 text-sm text-amber-800">
+            {dietaryFindings.map((f, i) => (
+              <li key={i}>
+                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {item.category === "dining" && (dining || diningEditable) && (
+        <section className="rounded-md border border-stone-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-stone-700">Dining details</h2>
+
+          {diningEditable ? (
+            <form
+              action={updateDiningDetailsAction.bind(null, tripId, itemId)}
+              className="grid gap-3"
+            >
+              <input
+                name="cuisine"
+                defaultValue={dining?.cuisine ?? ""}
+                placeholder="Cuisine (e.g. Neapolitan pizza)"
+                className="input"
+              />
+              <div>
+                <p className="mb-1 text-xs text-stone-500">Accommodates</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+                  {DIETARY_TAGS.map((tag) => (
+                    <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
+                      <input
+                        type="checkbox"
+                        name="accommodates"
+                        value={tag}
+                        defaultChecked={dining?.accommodates?.includes(tag) ?? false}
+                      />
+                      {DIETARY_TAG_LABEL[tag]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <input
+                  name="partySize"
+                  type="number"
+                  min={1}
+                  step={1}
+                  defaultValue={dining?.partySize ?? ""}
+                  placeholder="Party size"
+                  className="input"
+                />
+                <select name="priceRange" defaultValue={dining?.priceRange ?? ""} className="input">
+                  <option value="">Price</option>
+                  {PRICE_RANGES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  name="contactPhone"
+                  defaultValue={dining?.contactPhone ?? ""}
+                  placeholder="Restaurant phone"
+                  className="input"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  name="confirmationNumber"
+                  defaultValue={dining?.confirmationNumber ?? ""}
+                  placeholder="Confirmation number"
+                  className="input"
+                />
+                <select name="reservedBy" defaultValue={dining?.reservedBy ?? ""} className="input">
+                  <option value="">Reserved under (optional)</option>
+                  {access.members.map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.name ?? m.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <input
+                name="reservationUrl"
+                type="url"
+                defaultValue={dining?.reservationUrl ?? ""}
+                placeholder="Reservation link (optional)"
+                className="input"
+              />
+              <textarea
+                name="specialRequests"
+                defaultValue={dining?.specialRequests ?? ""}
+                placeholder="Special requests (optional) — high chair, occasion, etc."
+                className="input"
+                rows={2}
+              />
+              <button className="btn-secondary justify-self-start">Save dining details</button>
+            </form>
+          ) : (
+            dining && (
+              <dl className="space-y-1.5 text-sm text-stone-700">
+                {dining.cuisine && <Field label="Cuisine">{dining.cuisine}</Field>}
+                {dining.accommodates && dining.accommodates.length > 0 && (
+                  <Field label="Accommodates">
+                    {dining.accommodates.map((tag) => DIETARY_TAG_LABEL[tag]).join(" · ")}
+                  </Field>
+                )}
+                {dining.partySize != null && <Field label="Party size">{dining.partySize}</Field>}
+                {dining.priceRange && <Field label="Price">{dining.priceRange}</Field>}
+                {dining.contactPhone && <Field label="Restaurant phone">{dining.contactPhone}</Field>}
+                {dining.confirmationNumber && (
+                  <Field label="Confirmation #">{dining.confirmationNumber}</Field>
+                )}
+                {dining.reservedBy && (
+                  <Field label="Reserved under">
+                    {access.members.find((m) => m.userId === dining.reservedBy)?.name ??
+                      access.members.find((m) => m.userId === dining.reservedBy)?.email ??
+                      "—"}
+                  </Field>
+                )}
+                {dining.reservationUrl && (
+                  <Field label="Reservation link">
+                    <a href={dining.reservationUrl} className="text-teal-700 underline break-all">
+                      {dining.reservationUrl}
+                    </a>
+                  </Field>
+                )}
+                {dining.specialRequests && (
+                  <Field label="Special requests">
+                    <span className="whitespace-pre-wrap">{dining.specialRequests}</span>
                   </Field>
                 )}
               </dl>

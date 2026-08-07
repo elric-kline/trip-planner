@@ -5,6 +5,7 @@ import {
   uuid,
   primaryKey,
   doublePrecision,
+  integer,
   index,
   pgEnum,
   boolean,
@@ -47,6 +48,25 @@ export const rsvpResponse = pgEnum("rsvp_response", ["yes", "no", "maybe"]);
 /** Phase is normally derived from the trip dates; this forces it. */
 export const tripPhase = pgEnum("trip_phase", ["planning", "active", "completed"]);
 
+/**
+ * A fixed, checkable vocabulary rather than free text — the whole point is
+ * to eventually cross-reference this against a dining item's cuisine/menu
+ * tags and raise a warning automatically. Anything that doesn't fit a tag
+ * (severity, a specific ingredient) belongs in dietaryNotes instead.
+ */
+export const dietaryTag = pgEnum("dietary_tag", [
+  "vegetarian",
+  "vegan",
+  "pescatarian",
+  "gluten_free",
+  "dairy_free",
+  "nut_free",
+  "shellfish_free",
+  "halal",
+  "kosher",
+  "low_carb",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
@@ -57,6 +77,14 @@ export const users = pgTable("users", {
    * create a password (see lib/auth.ts's redeemLoginToken).
    */
   passwordHash: text("password_hash"),
+  /**
+   * Both null/empty until a user opts in via their profile. Global to the
+   * user rather than per-trip -- an allergy doesn't change trip to trip.
+   * Once set, it's visible to co-members on any trip they're on (see
+   * scope.ts) -- that's the disclosure; there's no separate per-trip toggle.
+   */
+  dietaryRestrictions: dietaryTag("dietary_restrictions").array(),
+  dietaryNotes: text("dietary_notes"),
   /**
    * No admin surface exists yet — this only marks who a future one should
    * trust. Seeded directly (see db/seed.ts), not settable via the app.
@@ -250,6 +278,43 @@ export const lodgingDetails = pgTable("lodging_details", {
   costAmount: doublePrecision("cost_amount"),
   /** ISO 4217, e.g. "USD" — free text, not validated against a currency list. */
   costCurrency: text("cost_currency"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const diningPriceRange = pgEnum("dining_price_range", ["$", "$$", "$$$", "$$$$"]);
+
+/**
+ * Same shape as lodgingDetails -- one row per dining item, holding what's
+ * specific to a restaurant reservation. Reservation time is the item's own
+ * startsAt/endsAt, same reasoning as lodging's check-in/out.
+ *
+ * accommodates reuses the dietaryTag vocabulary rather than inventing a
+ * separate one -- that's what lets conflicts.ts-style logic diff it directly
+ * against a trip member's own dietaryRestrictions and raise a warning. A
+ * null/empty accommodates means "not analyzed," same as a missing location
+ * in the travel-time conflict checker -- it does not mean "accommodates
+ * nothing," and must never be treated as a de-facto warning-everyone default.
+ *
+ * placeId is kept even though nothing queries it yet -- it's what a future
+ * LLM-refinement pass re-fetches Place Details from, and what a "View on
+ * Google Maps" link would use, without re-running a text search.
+ */
+export const diningDetails = pgTable("dining_details", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => items.id, { onDelete: "cascade" }),
+  placeId: text("place_id"),
+  cuisine: text("cuisine"),
+  accommodates: dietaryTag("accommodates").array(),
+  partySize: integer("party_size"),
+  priceRange: diningPriceRange("price_range"),
+  /** Must be a member of the trip — enforced in lib/dining.ts, not here. */
+  reservedBy: uuid("reserved_by").references(() => users.id),
+  confirmationNumber: text("confirmation_number"),
+  contactPhone: text("contact_phone"),
+  reservationUrl: text("reservation_url"),
+  specialRequests: text("special_requests"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
