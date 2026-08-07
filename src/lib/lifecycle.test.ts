@@ -6,6 +6,7 @@ import {
   checkPropose,
   checkRestore,
   checkRsvp,
+  checkShare,
   checkUnlock,
   checkUnschedule,
   statusForTime,
@@ -130,4 +131,17 @@ test("rsvp: only valid on locked, optional, group items", () => {
 
   const optionalLocked: LifecycleItem = { ...idea, status: "locked", commitment: "optional" };
   assert.deepEqual(checkRsvp(optionalLocked), { ok: true });
+});
+
+test("share: author-only, must not already be group, and must not be locked", () => {
+  const privateIdea: LifecycleItem = { ...idea, visibility: "private" };
+
+  assert.deepEqual(checkShare(privateIdea, author), { ok: true });
+  assert.equal(checkShare(privateIdea, planner).ok, false, "not the author -- not even a planner may share someone else's private item");
+  assert.equal(checkShare(privateIdea, stranger).ok, false);
+
+  assert.equal(checkShare(idea, author).ok, false, "already group -- nothing to share");
+
+  const lockedPrivate: LifecycleItem = { ...idea, visibility: "private", status: "locked" };
+  assert.equal(checkShare(lockedPrivate, author).ok, false, "must unlock first");
 });

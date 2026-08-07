@@ -5,16 +5,24 @@ import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { flagged } from "@/lib/conflicts.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
-import { createInviteAction } from "./actions.ts";
+import { createInviteAction, shareItemAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
-import DaysSection from "./DaysSection.tsx";
-import { ItemList } from "./itemDisplay.tsx";
+import AgreedDaysSection from "./AgreedDaysSection.tsx";
+import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
+import { ItemList, ItemRow } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
 
-/** Groups items by dayId, each day's list sorted by its manual/chronological draft order. Items with no dayId are dropped -- callers that want those want listItems' own status filters instead. */
+type Tab = "agreed" | "playspace" | "scratchpad";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "agreed", label: "Agreed" },
+  { id: "playspace", label: "PlaySpace" },
+  { id: "scratchpad", label: "Scratchpad" },
+];
+
+/** Groups items by dayId, each day's list sorted by its manual/chronological draft order. Items with no dayId are dropped -- callers that want those filter separately (see the dayless "Ideas" lists below). */
 function groupByDay(items: Item[]): Map<string, Item[]> {
   const grouped = new Map<string, Item[]>();
   for (const item of items) {
@@ -34,7 +42,7 @@ export default async function TripPage({
   searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string; invite?: string }>;
+  searchParams: Promise<{ error?: string; invite?: string; tab?: string }>;
 }) {
   const user = await getCurrentUser();
   const { tripId } = await params;
@@ -48,18 +56,38 @@ export default async function TripPage({
     throw err;
   }
 
-  const { error, invite } = await searchParams;
+  const { error, invite, tab } = await searchParams;
+  // Plain searchParams-driven tabs, not client state -- linkable/bookmarkable
+  // for free, no JS needed. An unrecognized or missing value just falls
+  // back to Agreed rather than erroring.
+  const activeTab: Tab = tab === "playspace" || tab === "scratchpad" ? tab : "agreed";
+
   const items = await listItems(access);
-  const locked = items.filter((i) => i.status === "locked" && i.startsAt);
-  // A day-linked item lives inside its day's own card now (see DaysSection
-  // below), whatever its status -- there's no separate cross-day "Proposed"
-  // list anymore. Ideas keeps its old job of holding ungrounded items, plus
-  // a safety net: anything that somehow got a time but no day (its date
-  // fell outside the trip's own span) still shows up *somewhere* rather
-  // than becoming invisible.
-  const ideas = items.filter((i) => !i.dayId && i.status !== "declined");
-  const declined = items.filter((i) => i.status === "declined");
-  const itemsByDay = groupByDay(items.filter((i) => i.status !== "declined"));
+  // listItems is already scoped (see scope.ts's visibleToViewer) so any
+  // "private" row here can only be one the viewer themselves authored --
+  // a private item belonging to anyone else was never in this array to
+  // begin with. That's what makes a plain visibility filter enough to mean
+  // "my Scratchpad," with no separate createdBy check needed.
+  const scratchpad = items.filter((i) => i.visibility === "private" && i.status !== "declined");
+  const scratchpadDeclined = items.filter((i) => i.visibility === "private" && i.status === "declined");
+
+  const shared = items.filter((i) => i.visibility === "group");
+  const locked = shared.filter((i) => i.status === "locked" && i.startsAt);
+  const lockedByDay = groupByDay(locked);
+  // Same safety net as the old Ideas list had: a locked item's date can, in
+  // principle, fall outside the trip's own span (placeInDay never grounded
+  // it to a day), and it shouldn't just vanish because of that.
+  const lockedOffCalendar = locked.filter((i) => !i.dayId);
+
+  // idea/proposed/locked -- everything shared and still live. Locked items
+  // are deliberately included here too (flagged via their own "locked"
+  // status badge), so a new proposal's conflicts against what's already
+  // agreed are visible in PlaySpace, not just in Agreed.
+  const inPlay = shared.filter((i) => i.status !== "declined");
+  const inPlayByDay = groupByDay(inPlay);
+  const playspaceIdeas = inPlay.filter((i) => !i.dayId);
+  const playspaceDeclined = shared.filter((i) => i.status === "declined");
+
   const findings = flagged(await conflictsForViewer(access));
   const dietaryFindings = await dietaryWarningsForViewer(access);
 
@@ -130,45 +158,115 @@ export default async function TripPage({
         </div>
       )}
 
-      <Section title="Days" subtitle="Click a day for its draft itinerary — the pencil edits wake/sleep and stops">
-        <DaysSection
-          tripId={tripId}
-          days={days}
-          locationsByDay={locationsByDay}
-          locationMembers={locationMembers}
-          itemsByDay={itemsByDay}
-          timezone={access.trip.timezone}
-          destination={access.trip.destination}
-          members={access.members}
-          viewerId={access.viewer.id}
-        />
-      </Section>
+      <nav className="flex gap-1 border-b border-stone-200">
+        {TABS.map((t) => (
+          <a
+            key={t.id}
+            href={`?tab=${t.id}`}
+            aria-current={activeTab === t.id ? "page" : undefined}
+            className={
+              activeTab === t.id
+                ? "border-b-2 border-stone-800 px-3 py-2 text-sm font-medium text-stone-900"
+                : "border-b-2 border-transparent px-3 py-2 text-sm font-medium text-stone-500 hover:text-stone-700"
+            }
+          >
+            {t.label}
+          </a>
+        ))}
+      </nav>
 
-      <Section title="Itinerary" subtitle="Locked items, in order">
-        {locked.length === 0 ? (
-          <Empty text="Nothing locked yet." />
-        ) : (
-          <ItemList tripId={tripId} items={locked} timezone={access.trip.timezone} />
-        )}
-      </Section>
-
-      <Section title="Ideas" subtitle="Not on a day yet — pin things here and drop them into a day when ready">
-        {ideas.length === 0 ? (
-          <Empty text="No ideas yet." />
-        ) : (
-          <ItemList tripId={tripId} items={ideas} timezone={access.trip.timezone} />
-        )}
-      </Section>
-
-      {declined.length > 0 && (
-        <Section title="Declined" subtitle="Restorable">
-          <ItemList tripId={tripId} items={declined} timezone={access.trip.timezone} />
-        </Section>
+      {activeTab === "agreed" && (
+        <div className="space-y-6">
+          <p className="text-xs text-stone-400">
+            The settled plan — locked items, day by day. Head to PlaySpace to propose something new.
+          </p>
+          <AgreedDaysSection
+            tripId={tripId}
+            days={days}
+            locationsByDay={locationsByDay}
+            locationMembers={locationMembers}
+            itemsByDay={lockedByDay}
+            timezone={access.trip.timezone}
+            members={access.members}
+            viewerId={access.viewer.id}
+          />
+          {lockedOffCalendar.length > 0 && (
+            <Section title="Locked, off the calendar" subtitle="Its date falls outside the trip's own span">
+              <ItemList tripId={tripId} items={lockedOffCalendar} timezone={access.trip.timezone} />
+            </Section>
+          )}
+        </div>
       )}
 
-      <Section title="Add something">
-        <AddItemForm tripId={tripId} destination={access.trip.destination} members={access.members} />
-      </Section>
+      {activeTab === "playspace" && (
+        <div className="space-y-6">
+          <p className="text-xs text-stone-400">
+            Everything shared with the group, overlapping in time — plus whatever&apos;s already locked (flagged
+            below) so you can see conflicts before locking something new. The Planner locks the winner, which
+            moves it to Agreed.
+          </p>
+          <PlaySpaceDaysSection
+            tripId={tripId}
+            days={days}
+            itemsByDay={inPlayByDay}
+            timezone={access.trip.timezone}
+            destination={access.trip.destination}
+            members={access.members}
+          />
+
+          <Section title="Ideas" subtitle="Shared, but not on a day yet">
+            {playspaceIdeas.length === 0 ? (
+              <Empty text="No ideas yet." />
+            ) : (
+              <ItemList tripId={tripId} items={playspaceIdeas} timezone={access.trip.timezone} />
+            )}
+          </Section>
+
+          {playspaceDeclined.length > 0 && (
+            <Section title="Declined" subtitle="Restorable">
+              <ItemList tripId={tripId} items={playspaceDeclined} timezone={access.trip.timezone} />
+            </Section>
+          )}
+
+          <Section title="Add an idea to share">
+            <AddItemForm
+              tripId={tripId}
+              destination={access.trip.destination}
+              members={access.members}
+              visibility="group"
+            />
+          </Section>
+        </div>
+      )}
+
+      {activeTab === "scratchpad" && (
+        <div className="space-y-6">
+          <p className="text-xs text-stone-400">Yours alone until you share it — nobody else on the trip can see these.</p>
+
+          <Section title="My ideas">
+            {scratchpad.length === 0 ? (
+              <Empty text="Nothing here yet." />
+            ) : (
+              <ScratchpadList tripId={tripId} items={scratchpad} timezone={access.trip.timezone} />
+            )}
+          </Section>
+
+          {scratchpadDeclined.length > 0 && (
+            <Section title="Declined" subtitle="Restorable">
+              <ItemList tripId={tripId} items={scratchpadDeclined} timezone={access.trip.timezone} />
+            </Section>
+          )}
+
+          <Section title="Add a private idea">
+            <AddItemForm
+              tripId={tripId}
+              destination={access.trip.destination}
+              members={access.members}
+              visibility="private"
+            />
+          </Section>
+        </div>
+      )}
 
       <Section title="People">
         <ul className="mb-3 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
@@ -235,5 +333,25 @@ export default async function TripPage({
 
   function Empty({ text }: { text: string }) {
     return <p className="text-sm text-stone-400">{text}</p>;
+  }
+
+  /** Same row as ItemList, plus a "Share to PlaySpace" action -- see items.ts's shareItem. */
+  function ScratchpadList({ tripId, items, timezone }: { tripId: string; items: Item[]; timezone: string }) {
+    return (
+      <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
+        {items.map((item) => (
+          <li key={item.id} className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <ItemRow tripId={tripId} item={item} timezone={timezone} />
+            </div>
+            <form action={shareItemAction.bind(null, tripId, item.id)} className="pr-4">
+              <button type="submit" className="whitespace-nowrap text-xs text-stone-500 underline hover:text-stone-700">
+                Share to PlaySpace
+              </button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    );
   }
 }

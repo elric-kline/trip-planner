@@ -12,6 +12,7 @@ import {
   RuleError,
   scheduleItem,
   setRsvp,
+  shareItem,
   unlockItem,
   unscheduleItem,
   updateItemDetails,
@@ -217,4 +218,58 @@ test("category-specific details (dining_details) are also orphaned on a category
 
   const after = await db.select().from(diningDetails).where(eq(diningDetails.itemId, item.id));
   assert.equal(after.length, 0);
+});
+
+test("shareItem: moves a private idea to group, author-only, and blocked once already shared", async (t) => {
+  const { trip, userIds, authorAccess, bystanderAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const scratchpadIdea = await createItem(authorAccess, { title: "Secret waterfall hike", visibility: "private" });
+  assert.equal(scratchpadIdea.visibility, "private");
+
+  // A bystander can't even see someone else's private item -- visibleToViewer
+  // (scope.ts) never returns it, so this 404s before checkShare's own
+  // author-only rule is reached. That rule is still real (see
+  // lifecycle.test.ts's isolated coverage of checkShare); it just can't be
+  // exercised end-to-end here, because the privacy boundary it backs up is
+  // already enforced one layer earlier.
+  await assert.rejects(
+    () => shareItem(bystanderAccess, scratchpadIdea.id),
+    (err: unknown) => err instanceof AccessError && err.kind === "NOT_FOUND",
+    "not the author -- can't even see someone else's private idea",
+  );
+
+  const shared = await shareItem(authorAccess, scratchpadIdea.id);
+  assert.equal(shared.visibility, "group");
+
+  await assert.rejects(
+    () => shareItem(authorAccess, shared.id),
+    RuleError,
+    "already shared -- nothing left to do",
+  );
+});
+
+test("shareItem: a locked private item must be unlocked first", async (t) => {
+  const { trip, userIds, authorAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const proposed = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "My own quiet morning run", visibility: "private" })).id,
+    new Date("2026-06-06T06:00:00Z"),
+    null,
+  );
+  // lockPrivateItemAction (actions.ts) is just lockItem with a null
+  // commitment -- a private item has no commitment to choose -- so this
+  // exercises the same rule (checkLock's private branch) straight through
+  // items.ts, independent of the actions.ts wiring.
+  const locked = await lockItem(authorAccess, proposed.id, null);
+  assert.equal(locked.status, "locked");
+  assert.equal(locked.visibility, "private");
+
+  await assert.rejects(() => shareItem(authorAccess, locked.id), RuleError, "must unlock before sharing");
+
+  const unlocked = await unlockItem(authorAccess, locked.id);
+  const shared = await shareItem(authorAccess, unlocked.id);
+  assert.equal(shared.visibility, "group");
 });

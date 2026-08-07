@@ -3,25 +3,26 @@ import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import DayCard from "./DayCard.tsx";
 
 /**
- * Day-by-day trip structure: where a multi-city trip wakes up and beds
- * down each day, whatever towns it passes through in between ("tour
- * destinations"), and the day's own draft itinerary -- items land here by
- * day, not in a separate cross-day "Proposed" list (see page.tsx). See
- * schema.ts's tripDayLocations comment for why wake/sleep/stops are all
- * one table rather than tripDays columns plus a separate waypoints table.
+ * The **Agreed** tab's day-by-day view: the settled record of where a
+ * multi-city trip wakes up and beds down each day, whatever towns it
+ * passes through in between ("tour destinations"), and whatever's actually
+ * locked in for that day. See schema.ts's tripDayLocations comment for why
+ * wake/sleep/stops are all one table rather than tripDays columns plus a
+ * separate waypoints table, and page.tsx for why `itemsByDay` here only
+ * ever holds locked items -- Agreed is a record, not a workspace; that's
+ * PlaySpace's job (see PlaySpaceDaysSection.tsx).
  *
  * Just a thin map over DayCard, which owns all the actual open/closed
  * interaction (see its own comment for why that needs to be a client
  * component rather than native `<details>`).
  */
-export default function DaysSection({
+export default function AgreedDaysSection({
   tripId,
   days,
   locationsByDay,
   locationMembers,
   itemsByDay,
   timezone,
-  destination,
   members,
   viewerId,
 }: {
@@ -31,7 +32,6 @@ export default function DaysSection({
   locationMembers: Map<string, string[]>;
   itemsByDay: Map<string, Item[]>;
   timezone: string;
-  destination: string;
   members: TripMemberSummary[];
   viewerId: string;
 }) {
@@ -46,7 +46,6 @@ export default function DaysSection({
           locationMembers={locationMembers}
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
-          destination={destination}
           members={members}
           viewerId={viewerId}
         />

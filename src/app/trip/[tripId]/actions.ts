@@ -13,6 +13,7 @@ import {
   restoreItem,
   scheduleItem,
   setRsvp,
+  shareItem,
   unlockItem,
   unscheduleItem,
   updateItemDetails,
@@ -239,6 +240,19 @@ export async function declineItemAction(tripId: string, itemId: string): Promise
   const access = await requireTripAccess(tripId, user);
   try {
     await declineItem(access, itemId);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+/** Moves an item from Scratchpad to PlaySpace -- see items.ts's shareItem. */
+export async function shareItemAction(tripId: string, itemId: string): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await shareItem(access, itemId);
   } catch (err) {
     withError(tripId, err);
   }

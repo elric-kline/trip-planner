@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, canEditItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
-import { checkRsvp, checkUnlock } from "@/lib/lifecycle.ts";
+import { checkRsvp, checkShare, checkUnlock } from "@/lib/lifecycle.ts";
 import { getLodgingDetails } from "@/lib/lodging.ts";
 import { getDiningDetails } from "@/lib/dining.ts";
 import { dietaryWarningsForItem } from "@/lib/dietary-conflicts-for.ts";
@@ -13,6 +13,7 @@ import {
   restoreItemAction,
   scheduleItemAction,
   setRsvpAction,
+  shareItemAction,
   unlockItemAction,
   unscheduleItemAction,
   updateItemAction,
@@ -64,6 +65,7 @@ export default async function ItemPage({
   const diningEditable = item.category === "dining" && editable;
   const rsvpAllowed = checkRsvp(item).ok;
   const unlockAllowed = checkUnlock(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
+  const shareAllowed = checkShare(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -80,6 +82,13 @@ export default async function ItemPage({
             <span className="badge bg-purple-100 text-purple-700">Private</span>
           )}
         </div>
+        {shareAllowed && (
+          <form action={shareItemAction.bind(null, tripId, itemId)} className="mb-1">
+            <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
+              Share to PlaySpace
+            </button>
+          </form>
+        )}
         {item.locationName && <p className="text-sm text-stone-500">{item.locationName}</p>}
         {item.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-stone-700">{item.notes}</p>}
       </div>
