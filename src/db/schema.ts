@@ -7,6 +7,7 @@ import {
   doublePrecision,
   integer,
   index,
+  uniqueIndex,
   pgEnum,
   boolean,
 } from "drizzle-orm/pg-core";
@@ -137,6 +138,69 @@ export const trips = pgTable("trips", {
     .references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * One row per calendar date of the trip (seeded when the trip is created --
+ * see lib/trips.ts's createTrip) -- a fixed 1:1 relationship to the trip's
+ * date span, not something the planner adds piecemeal. That's what lets an
+ * item find its own day just by date (no separate linking column needed)
+ * and makes a gap in the plan ("Day 4 has no lodging yet") visible without
+ * extra bookkeeping.
+ *
+ * Wake/sleep are deliberately independent free-text-plus-geocoded fields,
+ * not derived from a lodging item's check-in/check-out — a multi-city trip
+ * (Seattle -> ferry to Victoria -> Vancouver -> back to Seattle) often has
+ * the day's waking location differ from the prior night's lodging address
+ * in ways that aren't worth the timezone-aware date-range matching it'd
+ * take to infer reliably. Both, and every tripDayWaypoints row, are null
+ * until the planner sets them -- same "not yet analyzed, not a default"
+ * posture as everywhere else location data shows up in this app.
+ */
+export const tripDays = pgTable(
+  "trip_days",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    /** YYYY-MM-DD, same convention as trips.startDate/endDate -- no timezone attached. */
+    date: text("date").notNull(),
+    wakeLocationName: text("wake_location_name"),
+    wakeLocationLat: doublePrecision("wake_location_lat"),
+    wakeLocationLng: doublePrecision("wake_location_lng"),
+    sleepLocationName: text("sleep_location_name"),
+    sleepLocationLat: doublePrecision("sleep_location_lat"),
+    sleepLocationLng: doublePrecision("sleep_location_lng"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("trip_days_trip_date_idx").on(t.tripId, t.date),
+    index("trip_days_trip_idx").on(t.tripId),
+  ],
+);
+
+/**
+ * "Tour destinations" -- zero or more waypoints a day passes through besides
+ * where it starts and ends (lunch in one town, dinner in another). Ordered:
+ * the Ireland example ("start in one town, lunch in another, dinner in a
+ * third") is inherently sequential, even without exact times attached.
+ */
+export const tripDayWaypoints = pgTable(
+  "trip_day_waypoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dayId: uuid("day_id")
+      .notNull()
+      .references(() => tripDays.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("trip_day_waypoints_day_idx").on(t.dayId)],
+);
 
 export const tripMembers = pgTable(
   "trip_members",

@@ -20,6 +20,7 @@ import {
 } from "@/lib/items.ts";
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import { upsertDiningDetails, type DiningDetailsInput, type DiningPriceRange } from "@/lib/dining.ts";
+import { addWaypoint, moveWaypoint, removeWaypoint, updateDayLocations, type DayLocationInput } from "@/lib/days.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import type { DietaryTag } from "@/lib/dietary.ts";
@@ -53,6 +54,19 @@ function toNumberOrNull(value: FormDataEntryValue | null): number | null {
 async function geocode(query: string | null | undefined): Promise<{ lat: number; lng: number } | null> {
   if (!query) return null;
   return geocodeAddress(query);
+}
+
+/**
+ * Same "never overwrite good coordinates with a failed lookup" rule as
+ * geocode() above, plus one more case that only comes up for a Day's
+ * wake/sleep fields: explicitly clearing the location text should clear its
+ * coordinates too, not leave stale ones paired with a blank name.
+ * `null` here means "leave whatever coordinates were already there alone."
+ */
+async function geocodeField(name: string | null): Promise<{ lat: number | null; lng: number | null } | null> {
+  if (!name) return { lat: null, lng: null };
+  const coords = await geocode(name);
+  return coords ? { lat: coords.lat, lng: coords.lng } : null;
 }
 
 /** Redirects back to the trip with an error banner instead of crashing the request. */
@@ -350,4 +364,73 @@ export async function createInviteAction(tripId: string, formData: FormData): Pr
   const invite = await createInvite(tripId, user, { email });
 
   redirect(`/trip/${tripId}?invite=${invite.token}`);
+}
+
+export async function updateDayLocationsAction(
+  tripId: string,
+  dayId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const wakeLocationName = String(formData.get("wakeLocationName") ?? "") || null;
+  const sleepLocationName = String(formData.get("sleepLocationName") ?? "") || null;
+  const [wake, sleep] = await Promise.all([geocodeField(wakeLocationName), geocodeField(sleepLocationName)]);
+
+  const input: DayLocationInput = { wakeLocationName, sleepLocationName };
+  if (wake) {
+    input.wakeLocationLat = wake.lat;
+    input.wakeLocationLng = wake.lng;
+  }
+  if (sleep) {
+    input.sleepLocationLat = sleep.lat;
+    input.sleepLocationLng = sleep.lng;
+  }
+
+  try {
+    await updateDayLocations(access, dayId, input);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
+export async function addWaypointAction(tripId: string, dayId: string, formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const name = String(formData.get("name") ?? "");
+  const coords = await geocode(name);
+
+  try {
+    await addWaypoint(access, dayId, { name, lat: coords?.lat ?? null, lng: coords?.lng ?? null });
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
+export async function removeWaypointAction(tripId: string, waypointId: string): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await removeWaypoint(access, waypointId);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
+export async function moveWaypointAction(
+  tripId: string,
+  waypointId: string,
+  direction: "up" | "down",
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await moveWaypoint(access, waypointId, direction);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
 }

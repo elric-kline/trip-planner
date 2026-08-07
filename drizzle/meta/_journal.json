@@ -36,6 +36,13 @@
       "when": 1786055741822,
       "tag": "0004_purple_harpoon",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786068475626,
+      "tag": "0005_magical_morlocks",
+      "breakpoints": true
     }
   ]
 }
