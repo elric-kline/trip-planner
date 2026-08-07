@@ -20,7 +20,14 @@ import {
 } from "@/lib/items.ts";
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import { upsertDiningDetails, type DiningDetailsInput, type DiningPriceRange } from "@/lib/dining.ts";
-import { addLocation, moveLocation, removeLocation, setLocationMembers, type DayLocationKind } from "@/lib/days.ts";
+import {
+  addLocation,
+  moveLocation,
+  removeLocation,
+  renameLocation,
+  setLocationMembers,
+  type DayLocationKind,
+} from "@/lib/days.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import type { DietaryTag } from "@/lib/dietary.ts";
@@ -405,6 +412,27 @@ export async function addLocationAction(
   revalidatePath(`/trip/${tripId}`);
 }
 
+/**
+ * Edits an existing location's name and its Includes together, in one
+ * submit -- e.g. splitting a combined entry like "PA/NYC" down to just
+ * "PA" so "NYC" can be added alongside it as its own location. See
+ * days.ts's renameLocation.
+ */
+export async function updateLocationAction(tripId: string, locationId: string, formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const name = String(formData.get("name") ?? "");
+  const coords = await geocode(name);
+
+  try {
+    await renameLocation(access, locationId, { name, lat: coords?.lat ?? null, lng: coords?.lng ?? null });
+    await setLocationMembers(access, locationId, includedMemberIds(formData));
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
 export async function removeLocationAction(tripId: string, locationId: string): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
@@ -431,18 +459,3 @@ export async function moveLocationAction(
   revalidatePath(`/trip/${tripId}`);
 }
 
-/** A location's "Includes" checkboxes, edited on their own after the location already exists -- see the per-location member picker in DayCard.tsx. */
-export async function setLocationMembersAction(
-  tripId: string,
-  locationId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  try {
-    await setLocationMembers(access, locationId, includedMemberIds(formData));
-  } catch (err) {
-    withError(tripId, err);
-  }
-  revalidatePath(`/trip/${tripId}`);
-}

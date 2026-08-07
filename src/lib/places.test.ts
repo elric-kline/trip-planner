@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autocompleteAddress, searchRestaurants, getPlaceDetails } from "./places.ts";
+import { autocompleteAddress, autocompletePlace, searchRestaurants, getPlaceDetails } from "./places.ts";
 
 function clearEnv() {
   delete process.env.GOOGLE_MAPS_API_KEY;
@@ -172,6 +172,29 @@ test("searchRestaurants with no destination still searches, just without appendi
   await searchRestaurants("Sushi Saito", "");
   const [url] = fetchMock.mock.calls[0].arguments as [string];
   assert.match(url, /input=Sushi\+Saito(&|$)/);
+  clearEnv();
+});
+
+test("autocompletePlace restricts to Google's (regions) collection -- broad enough to include a sublocality like Brooklyn, not just (cities)'s locality-only match", async (t) => {
+  process.env.GOOGLE_MAPS_API_KEY = "test_key";
+  const fetchMock = t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          predictions: [{ description: "Brooklyn, NY, USA", place_id: "place_brooklyn" }],
+        }),
+        { status: 200 },
+      ),
+  );
+
+  const result = await autocompletePlace("Brooklyn");
+  assert.deepEqual(result, [{ description: "Brooklyn, NY, USA", placeId: "place_brooklyn" }]);
+
+  const [url] = fetchMock.mock.calls[0].arguments as [string];
+  assert.match(url, /types=%28regions%29/); // "(regions)", URL-encoded
   clearEnv();
 });
 

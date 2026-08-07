@@ -6,7 +6,7 @@ import type { DayLocationKind, TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import DayItemBuilder from "./DayItemBuilder.tsx";
-import { addLocationAction, moveLocationAction, removeLocationAction, setLocationMembersAction } from "./actions.ts";
+import { addLocationAction, moveLocationAction, removeLocationAction, updateLocationAction } from "./actions.ts";
 
 /** A short one-line preview of what's in the day, shown whether or not it's open. */
 function itemsSummary(items: Item[]): string {
@@ -35,63 +35,68 @@ function IncludesCheckboxes({ members }: { members: TripMemberSummary[] }) {
 }
 
 /**
- * One existing location's row in the editor: name, reorder/remove among
- * its own kind, and its own "Includes" checkboxes (reflecting who's
- * actually in it right now, not the all-checked default the add-form
- * uses -- this location already exists, so its real membership is known).
+ * One existing location's row in the editor. No numbering -- position in
+ * the list already shows order, and wake/sleep locations aren't sequential
+ * at all (they're parallel branches, not steps), so a "1., 2." prefix
+ * never meant much beyond stops, and wasn't worth a special case.
+ *
+ * Reorder/remove are their own tiny one-button forms (plain HTML forbids
+ * nesting a `<form>` inside another), but the name and Includes checkboxes
+ * are deliberately ONE form with ONE "Save" -- editing a location's name
+ * (e.g. splitting a combined "PA/NYC" entry down to just "PA" so "NYC" can
+ * become its own location) and adjusting who's in it are both "this
+ * location, as I want it now," not two separate edits.
  */
 function LocationRow({
   tripId,
   location,
-  index,
   members,
   includedIds,
 }: {
   tripId: string;
   location: TripDayLocation;
-  index: number;
   members: TripMemberSummary[];
   includedIds: string[];
 }) {
   return (
     <li className="rounded border border-stone-200 bg-white p-2">
-      <div className="flex items-center justify-between gap-2 text-sm text-stone-700">
-        <span>
-          {index + 1}. {location.name}
-        </span>
-        <div className="flex shrink-0 items-center gap-1 text-xs">
-          <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
-            <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
-              ↑
-            </button>
-          </form>
-          <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
-            <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
-              ↓
-            </button>
-          </form>
-          <form action={removeLocationAction.bind(null, tripId, location.id)}>
-            <button type="submit" className="px-1 text-red-500 underline">
-              Remove
-            </button>
-          </form>
-        </div>
+      <div className="flex items-center justify-end gap-1 text-xs">
+        <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
+          <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
+            ↑
+          </button>
+        </form>
+        <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
+          <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
+            ↓
+          </button>
+        </form>
+        <form action={removeLocationAction.bind(null, tripId, location.id)}>
+          <button type="submit" className="px-1 text-red-500 underline">
+            Remove
+          </button>
+        </form>
       </div>
-      <form
-        action={setLocationMembersAction.bind(null, tripId, location.id)}
-        className="mt-2 flex flex-wrap items-center gap-2"
-      >
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {members.map((m) => (
-            <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
-              <input type="checkbox" name="includes" value={m.userId} defaultChecked={includedIds.includes(m.userId)} />
-              {m.name ?? m.email}
-            </label>
-          ))}
+      <form action={updateLocationAction.bind(null, tripId, location.id)} className="mt-1 space-y-2">
+        <AddressAutocomplete name="name" defaultValue={location.name} className="input" restrict="place" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {members.map((m) => (
+              <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
+                <input
+                  type="checkbox"
+                  name="includes"
+                  value={m.userId}
+                  defaultChecked={includedIds.includes(m.userId)}
+                />
+                {m.name ?? m.email}
+              </label>
+            ))}
+          </div>
+          <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
+            Save
+          </button>
         </div>
-        <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
-          Save includes
-        </button>
       </form>
     </li>
   );
@@ -129,12 +134,11 @@ function LocationKindSection({
       <p className="mb-2 text-xs font-medium text-stone-500">{label}</p>
       {locations.length > 0 && (
         <ul className="mb-3 space-y-2">
-          {locations.map((location, i) => (
+          {locations.map((location) => (
             <LocationRow
               key={location.id}
               tripId={tripId}
               location={location}
-              index={i}
               members={members}
               includedIds={locationMembers.get(location.id) ?? []}
             />

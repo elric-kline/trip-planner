@@ -166,6 +166,31 @@ export async function addLocation(
   return created;
 }
 
+/**
+ * Edits an existing location's name/coordinates in place -- e.g. splitting
+ * a combined entry like "PA/NYC" into two by first renaming it down to
+ * just "PA," then adding "NYC" as its own location alongside it. Doesn't
+ * touch who's included -- that's setLocationMembers' job, called
+ * separately (see the "Save" form in DayCard.tsx, which submits both
+ * together).
+ */
+export async function renameLocation(
+  access: TripAccess,
+  locationId: string,
+  input: { name: string; lat?: number | null; lng?: number | null },
+): Promise<TripDayLocation> {
+  await getLocation(access, locationId);
+  const name = input.name.trim();
+  if (!name) throw new RuleError("Give the location a name.");
+
+  const [updated] = await db
+    .update(tripDayLocations)
+    .set({ name, lat: input.lat ?? null, lng: input.lng ?? null, updatedAt: new Date() })
+    .where(eq(tripDayLocations.id, locationId))
+    .returning();
+  return updated;
+}
+
 export async function removeLocation(access: TripAccess, locationId: string): Promise<void> {
   await getLocation(access, locationId);
   await db.delete(tripDayLocations).where(eq(tripDayLocations.id, locationId));
