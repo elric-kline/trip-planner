@@ -1,4 +1,4 @@
-import { asc, eq, inArray, max } from "drizzle-orm";
+import { and, asc, eq, inArray, max } from "drizzle-orm";
 import { db } from "@/db";
 import { tripDays, tripDayWaypoints } from "@/db/schema";
 import { eachCalendarDate } from "./time.ts";
@@ -52,10 +52,26 @@ export async function waypointsForDays(dayIds: string[]): Promise<Map<string, Tr
   return grouped;
 }
 
-async function getOwnDay(access: TripAccess, dayId: string): Promise<TripDay> {
+/** Validated fetch: throws unless dayId is really one of this trip's own days. Also used by items.ts when placing an item into a day. */
+export async function getDay(access: TripAccess, dayId: string): Promise<TripDay> {
   const [day] = await db.select().from(tripDays).where(eq(tripDays.id, dayId)).limit(1);
   if (!day || day.tripId !== access.trip.id) throw new RuleError("That day isn't part of this trip.");
   return day;
+}
+
+/**
+ * The day, if any, whose calendar date matches. Used to auto-ground a
+ * freshly-timed item (see items.ts's placeInDay) -- null, not a throw, when
+ * the date falls outside the trip's own span, since that's a normal "can't
+ * place it automatically" outcome, not a rule violation.
+ */
+export async function getDayByDate(tripId: string, date: string): Promise<TripDay | null> {
+  const [day] = await db
+    .select()
+    .from(tripDays)
+    .where(and(eq(tripDays.tripId, tripId), eq(tripDays.date, date)))
+    .limit(1);
+  return day ?? null;
 }
 
 /**
@@ -69,7 +85,7 @@ export async function updateDayLocations(
   dayId: string,
   input: DayLocationInput,
 ): Promise<TripDay> {
-  await getOwnDay(access, dayId);
+  await getDay(access, dayId);
 
   const [updated] = await db
     .update(tripDays)
@@ -84,7 +100,7 @@ export async function addWaypoint(
   dayId: string,
   input: { name: string; lat?: number | null; lng?: number | null },
 ): Promise<TripDayWaypoint> {
-  await getOwnDay(access, dayId);
+  await getDay(access, dayId);
   const name = input.name.trim();
   if (!name) throw new RuleError("Give the stop a name.");
 
@@ -113,7 +129,7 @@ async function getOwnWaypoint(access: TripAccess, waypointId: string): Promise<T
     .where(eq(tripDayWaypoints.id, waypointId))
     .limit(1);
   if (!waypoint) throw new RuleError("That stop doesn't exist.");
-  await getOwnDay(access, waypoint.dayId); // throws if the day isn't on this trip
+  await getDay(access, waypoint.dayId); // throws if the day isn't on this trip
   return waypoint;
 }
 

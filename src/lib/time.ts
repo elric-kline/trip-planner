@@ -65,6 +65,17 @@ export function utcToZonedInputValue(instant: Date, timeZone: string): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
+/**
+ * Which calendar date (`YYYY-MM-DD`) an instant falls on, read in
+ * `timeZone` -- e.g. "does this item's new startsAt land on one of the
+ * trip's own days?" (see items.ts's placeInDay). Just the date half of
+ * {@link utcToZonedInputValue}; a separate name because callers reaching
+ * for a bare date, not a datetime-local value, shouldn't have to know that.
+ */
+export function calendarDateInZone(instant: Date, timeZone: string): string {
+  return utcToZonedInputValue(instant, timeZone).slice(0, 10);
+}
+
 const MONTH_ABBREV = [
   "Jan",
   "Feb",

@@ -9,36 +9,25 @@ import { createInviteAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import DaysSection from "./DaysSection.tsx";
+import { ItemList } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, waypointsForDays } from "@/lib/days.ts";
 
-function formatItemTime(item: Item, timezone: string): string {
-  if (!item.startsAt) return "";
-  const tz = item.timezone ?? timezone;
-  const start = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(item.startsAt);
-  if (!item.endsAt) return start;
-  const end = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(item.endsAt);
-  return `${start} – ${end}`;
+/** Groups items by dayId, each day's list sorted by its manual/chronological draft order. Items with no dayId are dropped -- callers that want those want listItems' own status filters instead. */
+function groupByDay(items: Item[]): Map<string, Item[]> {
+  const grouped = new Map<string, Item[]>();
+  for (const item of items) {
+    if (!item.dayId) continue;
+    const list = grouped.get(item.dayId) ?? [];
+    list.push(item);
+    grouped.set(item.dayId, list);
+  }
+  for (const list of grouped.values()) {
+    list.sort((a, b) => (a.dayPosition ?? 0) - (b.dayPosition ?? 0));
+  }
+  return grouped;
 }
-
-const STATUS_BADGE: Record<Item["status"], string> = {
-  idea: "bg-stone-100 text-stone-600",
-  proposed: "bg-blue-100 text-blue-800",
-  locked: "bg-emerald-100 text-emerald-800",
-  declined: "bg-red-100 text-red-700 line-through",
-};
 
 export default async function TripPage({
   params,
@@ -62,9 +51,15 @@ export default async function TripPage({
   const { error, invite } = await searchParams;
   const items = await listItems(access);
   const locked = items.filter((i) => i.status === "locked" && i.startsAt);
-  const proposed = items.filter((i) => i.status === "proposed");
-  const ideas = items.filter((i) => i.status === "idea");
+  // A day-linked item lives inside its day's own card now (see DaysSection
+  // below), whatever its status -- there's no separate cross-day "Proposed"
+  // list anymore. Ideas keeps its old job of holding ungrounded items, plus
+  // a safety net: anything that somehow got a time but no day (its date
+  // fell outside the trip's own span) still shows up *somewhere* rather
+  // than becoming invisible.
+  const ideas = items.filter((i) => !i.dayId && i.status !== "declined");
   const declined = items.filter((i) => i.status === "declined");
+  const itemsByDay = groupByDay(items.filter((i) => i.status !== "declined"));
   const findings = flagged(await conflictsForViewer(access));
   const dietaryFindings = await dietaryWarningsForViewer(access);
 
@@ -133,8 +128,16 @@ export default async function TripPage({
         </div>
       )}
 
-      <Section title="Days" subtitle="Where each day wakes up, beds down, and passes through">
-        <DaysSection tripId={tripId} days={days} waypointsByDay={waypointsByDay} />
+      <Section title="Days" subtitle="Click a day to build it out — wake/sleep, stops, and its own draft itinerary">
+        <DaysSection
+          tripId={tripId}
+          days={days}
+          waypointsByDay={waypointsByDay}
+          itemsByDay={itemsByDay}
+          timezone={access.trip.timezone}
+          destination={access.trip.destination}
+          members={access.members}
+        />
       </Section>
 
       <Section title="Itinerary" subtitle="Locked items, in order">
@@ -145,15 +148,7 @@ export default async function TripPage({
         )}
       </Section>
 
-      <Section title="Proposed" subtitle="Has a time, not locked in">
-        {proposed.length === 0 ? (
-          <Empty text="No proposals yet." />
-        ) : (
-          <ItemList tripId={tripId} items={proposed} timezone={access.trip.timezone} />
-        )}
-      </Section>
-
-      <Section title="Ideas" subtitle="No time yet — pin things here and schedule later">
+      <Section title="Ideas" subtitle="Not on a day yet — pin things here and drop them into a day when ready">
         {ideas.length === 0 ? (
           <Empty text="No ideas yet." />
         ) : (
@@ -236,44 +231,5 @@ export default async function TripPage({
 
   function Empty({ text }: { text: string }) {
     return <p className="text-sm text-stone-400">{text}</p>;
-  }
-
-  function ItemList({
-    tripId,
-    items,
-    timezone,
-  }: {
-    tripId: string;
-    items: Item[];
-    timezone: string;
-  }) {
-    return (
-      <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
-        {items.map((item) => (
-          <li key={item.id}>
-            <a href={`/trip/${tripId}/items/${item.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-stone-50">
-              <div>
-                <div className="font-medium">
-                  {item.title}
-                  {item.visibility === "private" && (
-                    <span className="badge ml-2 bg-purple-100 text-purple-700">Private</span>
-                  )}
-                </div>
-                <div className="text-sm text-stone-500">
-                  {item.startsAt ? formatItemTime(item, timezone) : "No time yet"}
-                  {item.locationName ? ` · ${item.locationName}` : ""}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {item.commitment && (
-                  <span className="badge bg-stone-100 text-stone-700">{item.commitment}</span>
-                )}
-                <span className={`badge ${STATUS_BADGE[item.status]}`}>{item.status}</span>
-              </div>
-            </a>
-          </li>
-        ))}
-      </ul>
-    );
   }
 }
