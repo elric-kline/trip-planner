@@ -8,7 +8,12 @@
  * and lifecycle.ts vs items.ts: pure logic lives apart from whatever
  * touches the database or a Next.js-only API.
  */
-import { dietaryTag } from "@/db/schema";
+// Relative, not "@/db/schema" -- this file needs to resolve at runtime under
+// plain `node --test` (no bundler, no path-alias resolution), the same way
+// every other pure lib module here does. The alias is fine for Next.js
+// itself but breaks the moment a test imports a real *value* from here
+// (not just a type, which strips out and never touches this line).
+import { dietaryTag } from "../db/schema.ts";
 
 export type DietaryTag = (typeof dietaryTag.enumValues)[number];
 
