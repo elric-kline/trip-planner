@@ -16,8 +16,8 @@ export default async function SetPasswordPage({
     <div className="mx-auto max-w-sm">
       <h1 className="mb-1 text-xl font-semibold">Create a password</h1>
       <p className="mb-6 text-sm text-stone-500">
-        You're signed in as <strong>{user.email}</strong>. Set a password so you
-        can sign in directly next time, or keep using an email link — whichever's easier.
+        You&apos;re signed in as <strong>{user.email}</strong>. Set a password so you
+        can sign in directly next time, or keep using an email link — whichever&apos;s easier.
       </p>
 
       {error && (

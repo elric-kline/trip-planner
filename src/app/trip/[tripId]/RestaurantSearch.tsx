@@ -132,7 +132,7 @@ export default function RestaurantSearch({
       {loading && <p className="mt-1 text-xs text-stone-400">Looking up details…</p>}
       {error && (
         <p className="mt-1 text-xs text-red-600">
-          Couldn't fetch details for that one — try another result, or just fill the fields in below.
+          Couldn&apos;t fetch details for that one — try another result, or just fill the fields in below.
         </p>
       )}
       {open && (

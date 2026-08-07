@@ -22,7 +22,7 @@ export default async function ConfirmSignInPage({
     <div className="mx-auto max-w-sm text-center">
       <h1 className="mb-2 text-xl font-semibold">Finish signing in</h1>
       <p className="mb-6 text-sm text-stone-500">
-        Confirm below to sign in to AgreeMobile. This link works once, so it won't
+        Confirm below to sign in to AgreeMobile. This link works once, so it won&apos;t
         be redeemed until you click.
       </p>
 

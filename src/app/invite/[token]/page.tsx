@@ -14,7 +14,7 @@ export default async function AcceptInvitePage({
 
   return (
     <div className="mx-auto max-w-sm text-center">
-      <h1 className="mb-2 text-xl font-semibold">You're invited</h1>
+      <h1 className="mb-2 text-xl font-semibold">You&apos;re invited</h1>
 
       {error && (
         <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
