@@ -16,6 +16,7 @@
     "db:seed": "node --experimental-strip-types src/db/seed.ts",
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'",
     "test:integration": "node --test --experimental-strip-types --import ./scripts/register-alias-resolver.mjs --test-force-exit 'src/**/*.integration.ts'",
+    "test:coverage": "node --test --experimental-strip-types --import ./scripts/register-alias-resolver.mjs --test-force-exit --experimental-test-coverage --test-coverage-include='src/lib/**' --test-coverage-exclude='src/lib/**/*.test.ts' --test-coverage-exclude='src/lib/**/*.integration.ts' --test-coverage-exclude='src/lib/test-fixtures.ts' --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 'src/lib/**/*.test.ts' 'src/lib/**/*.integration.ts'",
     "lint": "eslint ."
   },
   "dependencies": {

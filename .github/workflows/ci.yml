@@ -92,6 +92,44 @@ jobs:
       - run: npm run db:migrate
       - run: npm run test:integration
 
+  # Enforces the 80% floor (lines, branches, functions) across src/lib as a
+  # whole -- src/lib is where this repo's actual coverage story lives (see
+  # test:coverage's own comment in package.json); UI/route code under
+  # src/app stays verified by manual Playwright, not automated coverage.
+  # Runs the unit and integration suites together in one process because
+  # Node's coverage report isn't merged across separate `node --test` runs
+  # -- test-unit and test-integration above stay as fast, separate pass/fail
+  # signals; this job answers a different question ("is coverage enough"),
+  # so a small amount of re-run overlap is worth keeping the two concerns
+  # distinct in the Actions UI.
+  coverage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trip_planner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/trip_planner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm run test:coverage
+
   build:
     runs-on: ubuntu-latest
     needs: [typecheck, lint]
