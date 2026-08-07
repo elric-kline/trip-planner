@@ -128,7 +128,7 @@ export default async function TripPage({
         </div>
       )}
 
-      <Section title="Days" subtitle="Click a day to build it out — wake/sleep, stops, and its own draft itinerary">
+      <Section title="Days" subtitle="Click a day for its draft itinerary — the pencil edits wake/sleep and stops">
         <DaysSection
           tripId={tripId}
           days={days}
