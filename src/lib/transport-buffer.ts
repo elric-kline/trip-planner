@@ -56,6 +56,24 @@ export function transportBufferFor(
 }
 
 /**
+ * Widens a transport item's own window by its subtype buffer -- preMinutes
+ * subtracted from the start, postMinutes added to the end. This is the
+ * piece lib/conflicts-for.ts feeds into analyzeTimeline in place of the
+ * item's raw startsAt/endsAt: a flight's neighbors need to see "occupied
+ * from security-line-start to bag-claim-done," not just wheels-up to
+ * wheels-down.
+ */
+export function widenForBuffer(
+  window: { startsAt: Date; endsAt: Date },
+  buffer: TransportBuffer,
+): { startsAt: Date; endsAt: Date } {
+  return {
+    startsAt: new Date(window.startsAt.getTime() - buffer.preMinutes * 60_000),
+    endsAt: new Date(window.endsAt.getTime() + buffer.postMinutes * 60_000),
+  };
+}
+
+/**
  * Minimum layover a connection needs before analyzeLegLayovers flags it as
  * tight. A conservative flat default, not real per-airport minimum
  * connection time data -- international connections (customs, immigration,

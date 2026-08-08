@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { transportDetails, transportLegs } from "@/db/schema";
 import { canEditItem, getItem, type TripAccess } from "./scope.ts";
@@ -47,6 +47,31 @@ export async function getTransportLegs(itemId: string): Promise<TransportLeg[]> 
     .from(transportLegs)
     .where(eq(transportLegs.itemId, itemId))
     .orderBy(asc(transportLegs.legOrder));
+}
+
+/** Batched lookup so a trip-wide conflict check doesn't issue one query per transport item -- same reasoning as dining.ts's getDiningDetailsForItems. */
+export async function getTransportDetailsForItems(itemIds: string[]): Promise<Map<string, TransportDetails>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await db.select().from(transportDetails).where(inArray(transportDetails.itemId, itemIds));
+  return new Map(rows.map((row) => [row.itemId, row]));
+}
+
+/** Batched lookup, grouped by item and ordered by legOrder within each group -- the ordering analyzeLegLayovers/deriveScheduleFromLegs both require. */
+export async function getTransportLegsForItems(itemIds: string[]): Promise<Map<string, TransportLeg[]>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(transportLegs)
+    .where(inArray(transportLegs.itemId, itemIds))
+    .orderBy(asc(transportLegs.legOrder));
+
+  const map = new Map<string, TransportLeg[]>();
+  for (const row of rows) {
+    const forItem = map.get(row.itemId);
+    if (forItem) forItem.push(row);
+    else map.set(row.itemId, [row]);
+  }
+  return map;
 }
 
 /**
