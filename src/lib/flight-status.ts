@@ -36,10 +36,11 @@ export type FlightStatusQuery = {
    * The flight's departure date as YYYY-MM-DD. AeroDataBox's dateLocal
    * parameter wants the *airport-local* calendar date; what's actually
    * passed here (see conflicts-for.ts's utcCalendarDate) is the UTC date of
-   * the leg's stored departsAt instant, a simplification -- for a flight
-   * departing within a few hours of local midnight, that can be the wrong
-   * calendar day and miss the match entirely. Fixing this properly needs
-   * the departure airport's timezone, which transport_legs doesn't store.
+   * the leg's stored departsAt instant -- transport_legs has no per-airport
+   * timezone to compute the true local date from. AeroDataBoxFlightStatusProvider
+   * covers the gap by also trying the adjacent calendar days (see
+   * candidateDates below), since a UTC offset can shift the local date by
+   * at most one day either way.
    */
   departureDate: string;
 };
@@ -99,6 +100,23 @@ export function effectiveLegTimes(
     departsAt: status.actualDepartsAt ?? status.estimatedDepartsAt ?? scheduled.departsAt,
     arrivesAt: status.actualArrivesAt ?? status.estimatedArrivesAt ?? scheduled.arrivesAt,
   };
+}
+
+/**
+ * `dateLocal` and its two neighbors, as YYYY-MM-DD, given first -- a UTC
+ * offset is at most ±14 hours, so an airport's local calendar date can
+ * differ from a UTC-derived date by at most one day in either direction,
+ * never two. Trying all three is how AeroDataBoxFlightStatusProvider
+ * covers for not knowing the departure airport's actual timezone (see
+ * FlightStatusQuery.departureDate).
+ */
+export function candidateDates(dateLocal: string): string[] {
+  const base = new Date(`${dateLocal}T00:00:00Z`);
+  const shift = (days: number) => {
+    const d = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  };
+  return [dateLocal, shift(-1), shift(1)];
 }
 
 const AERODATABOX_HOST = "aerodatabox.p.rapidapi.com";
@@ -167,6 +185,9 @@ export function toFlightStatus(raw: AeroDataBoxFlight): FlightStatus {
   };
 }
 
+/** A hard failure (no key, request error, non-OK HTTP) vs. "asked AeroDataBox and it had nothing for that date" -- only the latter is worth retrying on a neighboring date. */
+type DateQueryResult = { ok: true; flights: AeroDataBoxFlight[] } | { ok: false };
+
 export class AeroDataBoxFlightStatusProvider implements FlightStatusProvider {
   async lookup(query: FlightStatusQuery): Promise<FlightStatus | null> {
     const apiKey = process.env.AERODATABOX_API_KEY;
@@ -177,12 +198,23 @@ export class AeroDataBoxFlightStatusProvider implements FlightStatusProvider {
       return null;
     }
 
+    // Try the given date first, then its two neighbors -- see
+    // candidateDates for why a local-date mismatch is never more than one
+    // day off. Stops at the first date with a result; a hard failure on
+    // any attempt (bad key, network error, non-OK HTTP) aborts the whole
+    // lookup rather than burning quota on dates that won't fare any better.
+    for (const date of candidateDates(query.departureDate)) {
+      const result = await this.queryDate(query.flightNumber, date, apiKey);
+      if (!result.ok) return null;
+      if (result.flights.length > 0) return toFlightStatus(result.flights[0]);
+    }
+    return null;
+  }
+
+  private async queryDate(flightNumber: string, date: string, apiKey: string): Promise<DateQueryResult> {
     // dateLocalRole=Departure -- our date is (an approximation of) the
-    // departure-side calendar date, not the arrival side; see
-    // FlightStatusQuery.departureDate's doc for the UTC-vs-local caveat.
-    const url =
-      `${AERODATABOX_FLIGHTS_URL}/${encodeURIComponent(query.flightNumber)}/${query.departureDate}` +
-      `?dateLocalRole=Departure`;
+    // departure-side calendar date, not the arrival side.
+    const url = `${AERODATABOX_FLIGHTS_URL}/${encodeURIComponent(flightNumber)}/${date}?dateLocalRole=Departure`;
 
     let response: Response;
     try {
@@ -191,21 +223,18 @@ export class AeroDataBoxFlightStatusProvider implements FlightStatusProvider {
         signal: AbortSignal.timeout(5000),
       });
     } catch (err) {
-      console.warn(`[flight-status] request failed for ${query.flightNumber}:`, err);
-      return null;
+      console.warn(`[flight-status] request failed for ${flightNumber}:`, err);
+      return { ok: false };
     }
 
     if (!response.ok) {
-      console.warn(
-        `[flight-status] AeroDataBox returned HTTP ${response.status} for ${query.flightNumber}.`,
-      );
-      return null;
+      console.warn(`[flight-status] AeroDataBox returned HTTP ${response.status} for ${flightNumber}.`);
+      return { ok: false };
     }
 
     // Multiple entries can come back for a shared flight number across
     // codeshares/aircraft swaps -- the first is AeroDataBox's primary record.
-    const data = (await response.json()) as AeroDataBoxFlight[];
-    const flight = data?.[0];
-    return flight ? toFlightStatus(flight) : null;
+    const flights = (await response.json()) as AeroDataBoxFlight[];
+    return { ok: true, flights: flights ?? [] };
   }
 }

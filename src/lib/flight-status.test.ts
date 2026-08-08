@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   AeroDataBoxFlightStatusProvider,
   NoopFlightStatusProvider,
+  candidateDates,
   effectiveLegTimes,
   toFlightStatus,
   type FlightStatus,
@@ -22,6 +23,14 @@ test("NoopFlightStatusProvider always resolves null and never touches the networ
   const result = await provider.lookup({ flightNumber: "UA123", departureDate: "2026-08-10" });
   assert.equal(result, null);
   assert.equal(fetchMock.mock.calls.length, 0);
+});
+
+test("candidateDates: the given date first, then the day before and the day after", () => {
+  assert.deepEqual(candidateDates("2026-08-10"), ["2026-08-10", "2026-08-09", "2026-08-11"]);
+});
+
+test("candidateDates: shifts across a month/year boundary correctly", () => {
+  assert.deepEqual(candidateDates("2026-01-01"), ["2026-01-01", "2025-12-31", "2026-01-02"]);
 });
 
 test("effectiveLegTimes: with no status, falls back to scheduled", () => {
@@ -158,33 +167,63 @@ test("AeroDataBoxFlightStatusProvider: a successful lookup parses the first entr
   clearEnv();
 });
 
-test("AeroDataBoxFlightStatusProvider: an empty result array degrades to null", async (t) => {
+test("AeroDataBoxFlightStatusProvider: an empty result array on every candidate date degrades to null, having tried all three", async (t) => {
   process.env.AERODATABOX_API_KEY = "test_key";
-  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify([]), { status: 200 }));
+  const fetchMock = t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(JSON.stringify([]), { status: 200 }),
+  );
 
   const result = await new AeroDataBoxFlightStatusProvider().lookup({
     flightNumber: "ZZ999",
     departureDate: "2026-08-10",
   });
   assert.equal(result, null);
+
+  const dates = fetchMock.mock.calls.map((c) => new URL((c.arguments as [string])[0]).pathname.split("/").pop());
+  assert.deepEqual(dates, ["2026-08-10", "2026-08-09", "2026-08-11"]);
   clearEnv();
 });
 
-test("AeroDataBoxFlightStatusProvider: a non-OK HTTP response degrades to null instead of throwing", async (t) => {
+test("AeroDataBoxFlightStatusProvider: an empty first date but a hit on the day before -- the UTC/local mismatch this retry exists for", async (t) => {
   process.env.AERODATABOX_API_KEY = "test_key";
-  t.mock.method(globalThis, "fetch", async () => new Response("nope", { status: 500 }));
+  const fetchMock = t.mock.method(globalThis, "fetch", async (url: string) => {
+    // The flight actually departs late local time the day before the UTC-derived date.
+    if (url.includes("/2026-08-09")) {
+      return new Response(
+        JSON.stringify([{ status: "Expected", departure: {}, arrival: {} }]),
+        { status: 200 },
+      );
+    }
+    return new Response(JSON.stringify([]), { status: 200 });
+  });
+
+  const result = await new AeroDataBoxFlightStatusProvider().lookup({
+    flightNumber: "UA123",
+    departureDate: "2026-08-10",
+  });
+  assert.equal(result?.status, "scheduled");
+  // Stops as soon as it finds something -- doesn't also try the day after.
+  assert.equal(fetchMock.mock.calls.length, 2);
+});
+
+test("AeroDataBoxFlightStatusProvider: a non-OK HTTP response degrades to null instead of throwing, and does not retry other dates", async (t) => {
+  process.env.AERODATABOX_API_KEY = "test_key";
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("nope", { status: 500 }));
 
   const result = await new AeroDataBoxFlightStatusProvider().lookup({
     flightNumber: "UA123",
     departureDate: "2026-08-10",
   });
   assert.equal(result, null);
+  assert.equal(fetchMock.mock.calls.length, 1, "a hard failure isn't a date problem -- retrying wouldn't help");
   clearEnv();
 });
 
-test("AeroDataBoxFlightStatusProvider: a network failure degrades to null instead of throwing", async (t) => {
+test("AeroDataBoxFlightStatusProvider: a network failure degrades to null instead of throwing, and does not retry other dates", async (t) => {
   process.env.AERODATABOX_API_KEY = "test_key";
-  t.mock.method(globalThis, "fetch", async () => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("ECONNRESET");
   });
 
@@ -193,5 +232,6 @@ test("AeroDataBoxFlightStatusProvider: a network failure degrades to null instea
     departureDate: "2026-08-10",
   });
   assert.equal(result, null);
+  assert.equal(fetchMock.mock.calls.length, 1);
   clearEnv();
 });
