@@ -468,6 +468,15 @@ export async function updateTransportDetailsAction(
  * Also revalidates the trip page, not just the item's own, since saving
  * legs can move the item's startsAt/endsAt (and so its position in the
  * day's timeline).
+ *
+ * Each leg's arrival airport gets geocoded here (" airport" appended --
+ * Google resolves e.g. "SEA airport" far more reliably than the bare IATA
+ * code) so conflict analysis knows where the traveler actually lands, not
+ * just where the item's own generic Location field says it started -- see
+ * conflicts.ts's ScheduleItem.destinationLocation. A failed or skipped
+ * lookup just leaves that leg's arrival coordinates null; setTransportLegs
+ * still saves the leg, the conflict checker just can't reason about what
+ * comes after it.
  */
 export async function updateTransportLegsAction(
   tripId: string,
@@ -476,7 +485,13 @@ export async function updateTransportLegsAction(
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
-  const legs = parseTransportLegs(formData, access.trip.timezone);
+  const parsedLegs = parseTransportLegs(formData, access.trip.timezone);
+  const legs = await Promise.all(
+    parsedLegs.map(async (leg) => {
+      const coords = leg.arrivalAirport ? await geocode(`${leg.arrivalAirport} airport`) : null;
+      return { ...leg, arrivalLat: coords?.lat ?? null, arrivalLng: coords?.lng ?? null };
+    }),
+  );
 
   try {
     await setTransportLegs(access, itemId, legs);

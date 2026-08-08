@@ -505,6 +505,14 @@ export const transportDetails = pgTable("transport_details", {
  * checks each connection's dwell time against: a layover shorter than the
  * minimum connection time is itself worth flagging, separate from the
  * door-to-door buffer transportBufferFor adds around the whole item.
+ *
+ * arrivalLat/arrivalLng (geocoded from arrivalAirport when a leg is saved
+ * -- see actions.ts's updateTransportLegsAction) are what let the last
+ * leg's landing point, not the item's own generic location field, govern
+ * travel-time conflict checks against whatever comes after this item: a
+ * flight's own `location` is wherever it was set at creation (its
+ * departure point, typically), which has nothing to do with where the
+ * traveler actually ends up. See conflicts.ts's ScheduleItem.destinationLocation.
  */
 export const transportLegs = pgTable(
   "transport_legs",
@@ -519,6 +527,9 @@ export const transportLegs = pgTable(
     /** Free-text airport code, e.g. "SFO" -- not validated against an IATA list. */
     departureAirport: text("departure_airport"),
     arrivalAirport: text("arrival_airport"),
+    /** Null until arrivalAirport is successfully geocoded -- same "unset just means we can't analyze it" degrade as every other optional coordinate lookup in this app. */
+    arrivalLat: doublePrecision("arrival_lat"),
+    arrivalLng: doublePrecision("arrival_lng"),
     departsAt: timestamp("departs_at", { withTimezone: true }).notNull(),
     arrivesAt: timestamp("arrives_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

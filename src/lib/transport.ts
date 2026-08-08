@@ -26,6 +26,9 @@ export type TransportLegInput = {
   flightNumber?: string | null;
   departureAirport?: string | null;
   arrivalAirport?: string | null;
+  /** Geocoded from arrivalAirport by the caller (see actions.ts's updateTransportLegsAction) -- what lets this leg's actual landing point, not the item's own generic location, govern travel-time conflict checks against whatever comes next. Null just means "couldn't resolve it," same as any other optional coordinate lookup. */
+  arrivalLat?: number | null;
+  arrivalLng?: number | null;
   departsAt: Date;
   arrivesAt: Date;
 };
