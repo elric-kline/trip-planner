@@ -27,8 +27,32 @@ export type AgentOutcome = { reply: string } | { error: string };
 
 const MODEL = "claude-sonnet-5";
 const LOG_PREFIX = "[assistant]";
-/** A round-trip per tool call, plus the final reply -- generous enough for "search, look up details, check travel time, pin two ideas" in one turn without looping forever on a confused chain. */
+/** A round-trip per tool call, plus the final reply -- generous enough for "search, look up details, check travel time, pin two ideas" in one turn without looping forever on a confused chain. In practice OVERALL_BUDGET_MS below is almost always what cuts a long chain short first. */
 const MAX_ROUNDS = 8;
+/**
+ * A hard wall-clock budget for the *whole* turn, not just one round --
+ * comfortably under the ~60s default read/proxy timeout common to reverse
+ * proxies and load balancers. Without this, a multi-round tool-use chain
+ * could legitimately run for minutes end to end on a slow network, during
+ * which a request behind such a proxy gets silently dropped: the Server
+ * Action never resolves, and the chat just sits on "Thinking..." with no
+ * way to tell the difference between "still working" and "will never come
+ * back." Better to give up on our own terms, well before that, with a
+ * reply the UI can actually show.
+ */
+const OVERALL_BUDGET_MS = 50_000;
+/**
+ * Cap on any single call to Anthropic. Deliberately well under
+ * OVERALL_BUDGET_MS: if the network path to Anthropic is actually broken
+ * (DNS, egress, TLS -- not just "the model is thinking hard"), a real
+ * connection either succeeds within a few seconds or it doesn't happen at
+ * all, so there's no point burning most of the whole-turn budget waiting
+ * out one doomed attempt -- fail it fast and let the overall-budget check
+ * decide whether there's room to try again.
+ */
+const PER_CALL_TIMEOUT_MS = 20_000;
+/** Not worth starting another round if there isn't reasonably enough of the budget left for a real response to come back. */
+const MIN_ROUND_TIMEOUT_MS = 8_000;
 
 /**
  * Runs one user turn to completion: sends `userMessage` (with `history` as
@@ -36,12 +60,17 @@ const MAX_ROUNDS = 8;
  * tools like web_search resume on their own (see the pause_turn branch,
  * same pattern as cuisine-inference.ts's single-tool version, just looped);
  * custom tools call into `executors` and their result is handed back --
- * until it produces a final text reply or the round budget runs out.
+ * until it produces a final text reply, the round budget runs out, or the
+ * overall time budget runs out (see OVERALL_BUDGET_MS above).
  *
  * `history` is plain prior turns, not the raw tool-call blocks a previous
  * turn's own loop produced -- see schema.ts's assistantMessages doc for why
  * that's enough context for the model to still resolve "pin that one"
  * against its own earlier suggestion.
+ *
+ * `budgetMs` defaults to OVERALL_BUDGET_MS; only overridden by tests that
+ * need to exercise the early-exit path deterministically without actually
+ * waiting out the real budget.
  */
 export async function runAssistantTurn(
   apiKey: string,
@@ -50,6 +79,7 @@ export async function runAssistantTurn(
   userMessage: string,
   tools: ToolDefinition[],
   executors: ToolExecutors,
+  budgetMs: number = OVERALL_BUDGET_MS,
 ): Promise<AgentOutcome> {
   const messages: Record<string, unknown>[] = [
     ...history.map((t) => ({ role: t.role, content: t.content })),
@@ -63,8 +93,14 @@ export async function runAssistantTurn(
     tools,
   };
 
+  const startedAt = Date.now();
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const response = await callMessagesApi(apiKey, { ...baseBody, messages }, 45000, LOG_PREFIX);
+    const remaining = budgetMs - (Date.now() - startedAt);
+    if (remaining < MIN_ROUND_TIMEOUT_MS) {
+      return { error: "That's taking longer than expected — try asking again, maybe more specifically." };
+    }
+
+    const response = await callMessagesApi(apiKey, { ...baseBody, messages }, Math.min(PER_CALL_TIMEOUT_MS, remaining), LOG_PREFIX);
     if (!response) return { error: "The trip assistant couldn't be reached — try again in a moment." };
     if (response.stop_reason === "refusal") {
       return { error: "The assistant didn't have a response for that -- try rephrasing." };
