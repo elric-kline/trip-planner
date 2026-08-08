@@ -87,6 +87,7 @@ function parseLodgingFields(formData: FormData, timeZone: string): LodgingDetail
   return {
     address: str("address"),
     checkInInstructions: str("checkInInstructions"),
+    earliestCheckIn: localInputToDate(formData.get("earliestCheckIn"), timeZone),
     contactName: str("contactName"),
     contactPhone: str("contactPhone"),
     contactEmail: str("contactEmail"),

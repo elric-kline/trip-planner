@@ -24,6 +24,30 @@ test("getLodgingDetails is null until something is saved; upsertLodgingDetails t
   assert.equal(second?.contactPhone, "555-0100", "a field omitted from this call's input is left as-is -- onConflictDoUpdate only sets the columns it was given");
 });
 
+test("earliestCheckIn is stored distinctly from the item's own startsAt -- an arrival ahead of it doesn't move or clear either one", async (t) => {
+  const planner = await createTestUser();
+  const trip = await createTestTrip(planner);
+  t.after(() => cleanupTrip(trip.id, [planner.id]));
+  const access = await requireTripAccess(trip.id, planner);
+
+  const item = await createItem(access, { title: "Hotel Riviera", category: "lodging" });
+  const earliestCheckIn = new Date("2026-08-01T15:00:00Z"); // "front desk opens at 3 PM"
+  await upsertLodgingDetails(access, item.id, { earliestCheckIn });
+
+  const details = await getLodgingDetails(item.id);
+  assert.deepEqual(details?.earliestCheckIn, earliestCheckIn);
+
+  // Scheduling an earlier arrival is unaffected by (and doesn't touch) the
+  // property's own policy -- the two are independent fields, and only
+  // startsAt is what the conflict engine (see listItems/conflicts.ts) ever
+  // reads. This test only asserts the storage side of that split; the item
+  // detail page is what surfaces the "arriving before check-in" heads-up.
+  const arrival = new Date("2026-08-01T12:00:00Z");
+  const scheduled = await scheduleItem(access, item.id, arrival, null);
+  assert.deepEqual(scheduled.startsAt, arrival);
+  assert.deepEqual((await getLodgingDetails(item.id))?.earliestCheckIn, earliestCheckIn);
+});
+
 test("upsertLodgingDetails rejects a non-lodging item and a bookedBy who isn't on the trip", async (t) => {
   const planner = await createTestUser();
   const outsider = await createTestUser();

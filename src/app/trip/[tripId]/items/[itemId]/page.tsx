@@ -74,6 +74,12 @@ export default async function ItemPage({
   const layoverFindings =
     transportLegs.length > 1 ? analyzeLegLayovers(transportLegs, transport?.international) : [];
   const dietaryFindings = dining ? await dietaryWarningsForItem(access, item, dining.accommodates) : [];
+  // Purely a heads-up, not a conflict-engine finding -- earliestCheckIn
+  // never feeds conflicts.ts (see schema.ts's lodgingDetails doc comment);
+  // this just tells someone their planned arrival is ahead of when the
+  // property says the front desk opens.
+  const earliestCheckIn = lodging?.earliestCheckIn ?? null;
+  const earlyArrival = earliestCheckIn && item.startsAt && item.startsAt < earliestCheckIn ? earliestCheckIn : null;
   // Booking details are the thing that gets corrected after an item locks
   // (a late confirmation number, a fixed check-in code) — gated on the same
   // rule as the item itself, not the page's extra "not locked" restriction
@@ -136,6 +142,23 @@ export default async function ItemPage({
                 className="input"
                 rows={2}
               />
+              <label className="text-sm">
+                <span className="mb-1 block text-stone-700">Earliest check-in (optional)</span>
+                <input
+                  type="datetime-local"
+                  name="earliestCheckIn"
+                  defaultValue={
+                    lodging?.earliestCheckIn
+                      ? utcToZonedInputValue(lodging.earliestCheckIn, access.trip.timezone)
+                      : ""
+                  }
+                  className="input"
+                />
+                <span className="mt-1 block text-xs text-stone-400">
+                  The property&apos;s own policy, e.g. front desk opens at 3 PM -- informational only. Arrival, set
+                  below under Schedule, is what conflict checks use.
+                </span>
+              </label>
               <div className="grid grid-cols-3 gap-3">
                 <input
                   name="contactName"
@@ -233,6 +256,15 @@ export default async function ItemPage({
                     <span className="whitespace-pre-wrap">{lodging.checkInInstructions}</span>
                   </Field>
                 )}
+                {lodging.earliestCheckIn && (
+                  <Field label="Earliest check-in">
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: access.trip.timezone,
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(lodging.earliestCheckIn)}
+                  </Field>
+                )}
                 {(lodging.contactName || lodging.contactPhone || lodging.contactEmail) && (
                   <Field label="Contact">
                     {[lodging.contactName, lodging.contactPhone, lodging.contactEmail]
@@ -277,6 +309,21 @@ export default async function ItemPage({
             )
           )}
         </section>
+      )}
+
+      {earlyArrival && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Arriving before check-in opens</p>
+          <p className="mt-1 text-sm text-amber-800">
+            The planned arrival is before this property&apos;s earliest check-in ({" "}
+            {new Intl.DateTimeFormat("en-US", {
+              timeZone: access.trip.timezone,
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(earlyArrival)}
+            ) -- you may need to store bags or wait.
+          </p>
+        </div>
       )}
 
       {dietaryFindings.length > 0 && (
@@ -575,12 +622,12 @@ export default async function ItemPage({
       {item.status !== "locked" && item.status !== "declined" && (
         <section className="rounded-md border border-stone-200 bg-white p-4">
           <h2 className="mb-2 text-sm font-semibold text-stone-700">
-            {item.category === "lodging" ? "Check-in / check-out" : "Schedule"}
+            {item.category === "lodging" ? "Arrival / departure" : "Schedule"}
           </h2>
           <form action={scheduleItemAction.bind(null, tripId, itemId)} className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-stone-700">
-                {item.category === "lodging" ? "Check-in" : "Starts"}
+                {item.category === "lodging" ? "Arrival" : "Starts"}
               </span>
               <input
                 type="datetime-local"
@@ -592,7 +639,7 @@ export default async function ItemPage({
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-stone-700">
-                {item.category === "lodging" ? "Check-out (optional)" : "Ends (optional)"}
+                {item.category === "lodging" ? "Departure (optional)" : "Ends (optional)"}
               </span>
               <input
                 type="datetime-local"
@@ -605,6 +652,12 @@ export default async function ItemPage({
               {item.status === "proposed" ? "Update time" : "Propose a time"}
             </button>
           </form>
+          {item.category === "lodging" && (
+            <p className="mt-2 text-xs text-stone-400">
+              When you actually plan to show up and leave -- this is what travel-time conflict checks use, not the
+              property&apos;s check-in policy above.
+            </p>
+          )}
 
           {item.status === "proposed" && (
             <form action={unscheduleItemAction.bind(null, tripId, itemId)} className="mt-2">

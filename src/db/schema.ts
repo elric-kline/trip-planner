@@ -393,9 +393,18 @@ export const lodgingPaymentStatus = pgEnum("lodging_payment_status", [
  * pattern to repeat (dining_details, transport_details, ...) rather than a
  * generic polymorphic blob nobody's asked for yet.
  *
- * Check-in/check-out aren't columns here — they're the item's own
- * `startsAt`/`endsAt`, so a lodging stay slots into the conflict engine and
- * timeline like any other locked item, for free.
+ * The item's own `startsAt`/`endsAt` are the group's arrival and departure
+ * -- when they actually intend to show up and leave, not a fixed policy -- so
+ * a lodging stay slots into the conflict engine and timeline like any other
+ * locked item, for free, and travel-time conflicts are judged against when
+ * people will really be there.
+ *
+ * `earliestCheckIn` is a different thing entirely: the property's own
+ * stated policy (e.g. "check-in from 3:00 PM"), purely informational.
+ * Arriving before it doesn't free up an earlier slot in anyone's day, so it
+ * must never feed the conflict engine or replace `startsAt` -- it's there
+ * so the UI can surface a heads-up ("you're arriving before check-in
+ * opens") without pretending that's when the stay actually begins.
  */
 export const lodgingDetails = pgTable("lodging_details", {
   itemId: uuid("item_id")
@@ -403,6 +412,8 @@ export const lodgingDetails = pgTable("lodging_details", {
     .references(() => items.id, { onDelete: "cascade" }),
   address: text("address"),
   checkInInstructions: text("check_in_instructions"),
+  /** The property's earliest-allowed check-in, e.g. "front desk opens at 3 PM" -- informational only, never used for scheduling/conflicts. See table doc comment above. */
+  earliestCheckIn: timestamp("earliest_check_in", { withTimezone: true }),
   contactName: text("contact_name"),
   contactPhone: text("contact_phone"),
   contactEmail: text("contact_email"),
