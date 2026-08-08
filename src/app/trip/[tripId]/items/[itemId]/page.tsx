@@ -5,6 +5,8 @@ import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
 import { checkRsvp, checkShare, checkUnlock } from "@/lib/lifecycle.ts";
 import { getLodgingDetails } from "@/lib/lodging.ts";
 import { getDiningDetails } from "@/lib/dining.ts";
+import { getTransportDetails, getTransportLegs } from "@/lib/transport.ts";
+import { analyzeLegLayovers, transportBufferFor } from "@/lib/transport-buffer.ts";
 import { dietaryWarningsForItem } from "@/lib/dietary-conflicts-for.ts";
 import {
   declineItemAction,
@@ -19,12 +21,23 @@ import {
   updateItemAction,
   updateLodgingDetailsAction,
   updateDiningDetailsAction,
+  updateTransportDetailsAction,
+  updateTransportLegsAction,
 } from "../../actions.ts";
 import { canLockItem } from "@/lib/scope.ts";
 import { utcToZonedInputValue } from "@/lib/time.ts";
 import AddressAutocomplete from "../../AddressAutocomplete.tsx";
 import DiningEditForm from "../../DiningEditForm.tsx";
+import TransportLegsEditor from "../../TransportLegsEditor.tsx";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
+
+const TRANSPORT_SUBTYPE_LABEL = {
+  flight: "Flight",
+  train: "Train",
+  drive: "Drive",
+  rideshare: "Rideshare",
+  other: "Other",
+} as const;
 
 const PAYMENT_STATUS_LABEL = {
   prepaid: "Prepaid",
@@ -56,6 +69,10 @@ export default async function ItemPage({
   const editable = canEditItem(access, item);
   const lodging = item.category === "lodging" ? await getLodgingDetails(itemId) : null;
   const dining = item.category === "dining" ? await getDiningDetails(itemId) : null;
+  const transport = item.category === "transport" ? await getTransportDetails(itemId) : null;
+  const transportLegs = transport?.subtype === "flight" ? await getTransportLegs(itemId) : [];
+  const layoverFindings =
+    transportLegs.length > 1 ? analyzeLegLayovers(transportLegs, transport?.international) : [];
   const dietaryFindings = dining ? await dietaryWarningsForItem(access, item, dining.accommodates) : [];
   // Booking details are the thing that gets corrected after an item locks
   // (a late confirmation number, a fixed check-in code) — gated on the same
@@ -63,6 +80,7 @@ export default async function ItemPage({
   // the base title/notes edit form imposes below.
   const lodgingEditable = item.category === "lodging" && editable;
   const diningEditable = item.category === "dining" && editable;
+  const transportEditable = item.category === "transport" && editable;
   const rsvpAllowed = checkRsvp(item).ok;
   const unlockAllowed = checkUnlock(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
   const shareAllowed = checkShare(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
@@ -325,6 +343,169 @@ export default async function ItemPage({
                 )}
               </dl>
             )
+          )}
+        </section>
+      )}
+
+      {item.category === "transport" && (transport || transportEditable) && (
+        <section className="rounded-md border border-stone-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-stone-700">Transport details</h2>
+
+          {transportEditable ? (
+            <form action={updateTransportDetailsAction.bind(null, tripId, itemId)} className="grid gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <select name="subtype" defaultValue={transport?.subtype ?? "other"} className="input">
+                  {Object.entries(TRANSPORT_SUBTYPE_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                {(transport?.subtype ?? "other") === "flight" && (
+                  <label className="flex items-center gap-2 text-sm text-stone-700">
+                    <input type="checkbox" name="international" defaultChecked={transport?.international ?? false} />
+                    International
+                  </label>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  name="confirmationNumber"
+                  defaultValue={transport?.confirmationNumber ?? ""}
+                  placeholder="Confirmation number"
+                  className="input"
+                />
+                <select name="bookedBy" defaultValue={transport?.bookedBy ?? ""} className="input">
+                  <option value="">Booked under (optional)</option>
+                  {access.members.map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.name ?? m.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  name="costAmount"
+                  type="number"
+                  step="any"
+                  defaultValue={transport?.costAmount ?? ""}
+                  placeholder="Cost"
+                  className="input"
+                />
+                <input
+                  name="costCurrency"
+                  defaultValue={transport?.costCurrency ?? ""}
+                  placeholder="USD"
+                  className="input"
+                  maxLength={8}
+                />
+              </div>
+              <input
+                name="bookingUrl"
+                type="url"
+                defaultValue={transport?.bookingUrl ?? ""}
+                placeholder="Booking link (optional)"
+                className="input"
+              />
+              <button className="btn-secondary justify-self-start">Save transport details</button>
+            </form>
+          ) : (
+            transport && (
+              <dl className="space-y-1.5 text-sm text-stone-700">
+                <Field label="Type">
+                  {TRANSPORT_SUBTYPE_LABEL[transport.subtype]}
+                  {transport.subtype === "flight" && transport.international ? " (international)" : ""}
+                </Field>
+                {transport.confirmationNumber && (
+                  <Field label="Confirmation #">{transport.confirmationNumber}</Field>
+                )}
+                {transport.bookedBy && (
+                  <Field label="Booked under">
+                    {access.members.find((m) => m.userId === transport.bookedBy)?.name ??
+                      access.members.find((m) => m.userId === transport.bookedBy)?.email ??
+                      "—"}
+                  </Field>
+                )}
+                {transport.costAmount != null && (
+                  <Field label="Cost">
+                    {transport.costAmount} {transport.costCurrency ?? ""}
+                  </Field>
+                )}
+                {transport.bookingUrl && (
+                  <Field label="Booking link">
+                    <a href={transport.bookingUrl} className="text-teal-700 underline break-all">
+                      {transport.bookingUrl}
+                    </a>
+                  </Field>
+                )}
+              </dl>
+            )
+          )}
+
+          {transport &&
+            (() => {
+              const buffer = transportBufferFor(transport.subtype, transport.international);
+              if (buffer.preMinutes === 0 && buffer.postMinutes === 0) return null;
+              return (
+                <p className="mt-3 text-xs text-stone-400">
+                  When checking for conflicts, this adds {buffer.preMinutes > 0 && `${buffer.preMinutes} min before`}
+                  {buffer.preMinutes > 0 && buffer.postMinutes > 0 && " and "}
+                  {buffer.postMinutes > 0 && `${buffer.postMinutes} min after`} its own start/end time.
+                </p>
+              );
+            })()}
+        </section>
+      )}
+
+      {transport?.subtype === "flight" && (transportLegs.length > 0 || transportEditable) && (
+        <section className="rounded-md border border-stone-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-stone-700">Flight legs</h2>
+
+          {layoverFindings.some((f) => f.tight) && (
+            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {layoverFindings
+                .filter((f) => f.tight)
+                .map((f, i) => (
+                  <p key={i}>
+                    Only {Math.round(f.layoverMinutes)} min between legs — under the {f.minimumMinutes} min minimum
+                    connection time.
+                  </p>
+                ))}
+            </div>
+          )}
+
+          {transportEditable ? (
+            <TransportLegsEditor
+              action={updateTransportLegsAction.bind(null, tripId, itemId)}
+              legs={transportLegs}
+              timeZone={item.timezone ?? access.trip.timezone}
+            />
+          ) : (
+            <ol className="space-y-2 text-sm text-stone-700">
+              {transportLegs.map((leg, i) => (
+                <li key={leg.id} className="rounded-md border border-stone-100 bg-stone-50 p-2">
+                  <p className="font-medium">
+                    Leg {i + 1}
+                    {leg.flightNumber ? ` — ${leg.flightNumber}` : ""}
+                    {leg.airline ? ` (${leg.airline})` : ""}
+                  </p>
+                  <p className="text-stone-500">
+                    {leg.departureAirport ?? "?"} → {leg.arrivalAirport ?? "?"} ·{" "}
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: item.timezone ?? access.trip.timezone,
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(leg.departsAt)}{" "}
+                    →{" "}
+                    {new Intl.DateTimeFormat("en-US", {
+                      timeZone: item.timezone ?? access.trip.timezone,
+                      timeStyle: "short",
+                    }).format(leg.arrivesAt)}
+                  </p>
+                </li>
+              ))}
+            </ol>
           )}
         </section>
       )}
