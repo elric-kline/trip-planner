@@ -208,7 +208,7 @@ test("getPlaceDetails with no API key configured returns null and never calls fe
   assert.equal(fetchMock.mock.calls.length, 0);
 });
 
-test("getPlaceDetails maps a successful response, including a numeric price_level of 0", async (t) => {
+test("getPlaceDetails maps a successful response, including a numeric price_level of 0 and its geometry.location as lat/lng", async (t) => {
   process.env.GOOGLE_MAPS_API_KEY = "test_key";
   const fetchMock = t.mock.method(
     globalThis,
@@ -223,6 +223,7 @@ test("getPlaceDetails maps a successful response, including a numeric price_leve
             formatted_phone_number: "+81 3-0000-0000",
             website: "https://sushi-saito.example",
             price_level: 4,
+            geometry: { location: { lat: 35.6641, lng: 139.7294 } },
           },
         }),
         { status: 200 },
@@ -236,16 +237,19 @@ test("getPlaceDetails maps a successful response, including a numeric price_leve
     phone: "+81 3-0000-0000",
     website: "https://sushi-saito.example",
     priceLevel: 4,
+    lat: 35.6641,
+    lng: 139.7294,
   });
 
   const [url] = fetchMock.mock.calls[0].arguments as [string];
   assert.match(url, /^https:\/\/maps\.googleapis\.com\/maps\/api\/place\/details\/json\?/);
   assert.match(url, /place_id=place_sushi/);
+  assert.match(url, /fields=[^&]*geometry/);
   assert.match(url, /key=test_key/);
   clearEnv();
 });
 
-test("getPlaceDetails fills in nulls for whatever fields Google doesn't return", async (t) => {
+test("getPlaceDetails fills in nulls for whatever fields Google doesn't return, including a missing geometry", async (t) => {
   process.env.GOOGLE_MAPS_API_KEY = "test_key";
   t.mock.method(
     globalThis,
@@ -261,6 +265,8 @@ test("getPlaceDetails fills in nulls for whatever fields Google doesn't return",
     phone: null,
     website: null,
     priceLevel: null,
+    lat: null,
+    lng: null,
   });
   clearEnv();
 });

@@ -551,3 +551,36 @@ export const transportLegs = pgTable(
     index("transport_legs_item_idx").on(t.itemId),
   ],
 );
+
+export const assistantMessageRole = pgEnum("assistant_message_role", ["user", "assistant"]);
+
+/**
+ * The trip assistant's chat log -- one thread per (trip, user), Scratchpad-
+ * scoped like everything else that's only ever visible to its own author
+ * (see items.visibility's "private" and how visibleToViewer enforces it;
+ * this table isn't items at all, but the same "yours alone" boundary
+ * applies, checked in lib/assistant.ts by scoping every query to
+ * access.viewer.id, not a DB constraint).
+ *
+ * Deliberately plain text per turn, not the raw Anthropic content blocks a
+ * tool-using exchange actually produces -- a turn's tool calls run and
+ * resolve within that single request, and only the final human-readable
+ * reply is worth replaying as conversation history on the next message. See
+ * lib/assistant-agent.ts's runAssistantTurn.
+ */
+export const assistantMessages = pgTable(
+  "assistant_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: assistantMessageRole("role").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("assistant_messages_trip_user_idx").on(t.tripId, t.userId, t.createdAt)],
+);

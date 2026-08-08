@@ -112,6 +112,9 @@ export type PlaceDetails = {
   website: string | null;
   /** Google's 0 (free) - 4 (very expensive) scale; null when the venue hasn't reported one. */
   priceLevel: number | null;
+  /** The point Places itself resolved this to -- what lets a caller (e.g. lib/assistant.ts's get_place_details tool) reason about travel time or save a real location without a second, separately-fallible geocode of the formatted address. */
+  lat: number | null;
+  lng: number | null;
 };
 
 type GoogleDetailsResponse = {
@@ -123,6 +126,7 @@ type GoogleDetailsResponse = {
     formatted_phone_number?: string;
     website?: string;
     price_level?: number;
+    geometry?: { location?: { lat?: number; lng?: number } };
   };
 };
 
@@ -145,7 +149,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetails | n
 
   const params = new URLSearchParams({
     place_id: id,
-    fields: "name,formatted_address,formatted_phone_number,website,price_level",
+    fields: "name,formatted_address,formatted_phone_number,website,price_level,geometry",
     key: apiKey,
   });
   const url = `${DETAILS_API_URL}?${params}`;
@@ -172,11 +176,14 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetails | n
   }
 
   const result = data.result ?? {};
+  const location = result.geometry?.location;
   return {
     name: result.name ?? null,
     formattedAddress: result.formatted_address ?? null,
     phone: result.formatted_phone_number ?? null,
     website: result.website ?? null,
     priceLevel: typeof result.price_level === "number" ? result.price_level : null,
+    lat: typeof location?.lat === "number" ? location.lat : null,
+    lng: typeof location?.lng === "number" ? location.lng : null,
   };
 }
