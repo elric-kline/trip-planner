@@ -99,6 +99,13 @@
       "when": 1786225383717,
       "tag": "0013_minor_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786229532548,
+      "tag": "0014_faithful_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

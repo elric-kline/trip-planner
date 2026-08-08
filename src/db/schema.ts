@@ -595,3 +595,44 @@ export const assistantMessages = pgTable(
   },
   (t) => [index("assistant_messages_trip_user_idx").on(t.tripId, t.userId, t.createdAt)],
 );
+
+/**
+ * One row per user, global rather than per-trip -- same reasoning as
+ * users.dietaryRestrictions (a passport doesn't change trip to trip) --
+ * but deliberately its own table rather than columns on `users` itself,
+ * for two reasons beyond the usual "don't bloat the base table" one every
+ * other *_details table already follows: this holds a photo (routinely
+ * hundreds of KB to a few MB, nothing else on `users` is remotely that
+ * size), and keeping it physically separate means a `select()` that
+ * forgets to name its columns explicitly on `users` can never accidentally
+ * pull passport data along for the ride.
+ *
+ * Every field below except photoMimeType is application-level encrypted
+ * (see lib/encryption.ts) before it ever reaches this table -- each
+ * `*Encrypted` column holds an opaque `iv:authTag:ciphertext` envelope,
+ * not the real value. photoMimeType is the one deliberate exception: it's
+ * needed to serve the photo back correctly (the `data:` URI's own type)
+ * and isn't sensitive on its own (knowing someone uploaded a JPEG reveals
+ * nothing).
+ *
+ * Visibility is narrower than dietary info's "any co-member on a shared
+ * trip": only a trip's planner may see a member's passport info (see
+ * lib/passport.ts's canViewMemberPassport), matching the actual reason
+ * this exists -- "the person making bookings needs everyone's passport
+ * info" -- rather than the broader group-wide disclosure dietary
+ * restrictions get, since this is far more sensitive than an allergy.
+ */
+export const passportDetails = pgTable("passport_details", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  fullNameEncrypted: text("full_name_encrypted"),
+  passportNumberEncrypted: text("passport_number_encrypted"),
+  nationalityEncrypted: text("nationality_encrypted"),
+  /** YYYY-MM-DD, encrypted -- same date-only convention as trips.startDate/endDate, just enciphered. */
+  dateOfBirthEncrypted: text("date_of_birth_encrypted"),
+  expiryDateEncrypted: text("expiry_date_encrypted"),
+  photoEncrypted: text("photo_encrypted"),
+  photoMimeType: text("photo_mime_type"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

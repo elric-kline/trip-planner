@@ -18,6 +18,7 @@ import { ItemList, ItemRow } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
+import { getPassportDetailsForUsers } from "@/lib/passport.ts";
 
 type Tab = "agreed" | "playspace" | "scratchpad";
 const TABS: { id: Tab; label: string }[] = [
@@ -73,6 +74,12 @@ export default async function TripPage({
   // Only fetched for the tab that actually shows it -- no point querying the
   // assistant's own conversation log on every other tab's render.
   const assistantHistory = activeTab === "scratchpad" ? await getAssistantHistory(access) : [];
+  // Only the planner ever sees passport info at all (see
+  // canViewMemberPassport) -- a participant never pays the decrypt cost for
+  // data they can't see anyway.
+  const passportByMember = access.isPlanner
+    ? await getPassportDetailsForUsers(access.members.map((m) => m.userId))
+    : new Map();
 
   const items = await listItems(access);
   // listItems is already scoped (see scope.ts's visibleToViewer) so any
@@ -351,6 +358,24 @@ export default async function TripPage({
                     .join(" · ")}
                 </p>
               )}
+              {access.isPlanner &&
+                passportByMember.has(m.userId) &&
+                (() => {
+                  const p = passportByMember.get(m.userId)!;
+                  const bits = [
+                    p.fullName,
+                    p.passportNumber && `#${p.passportNumber}`,
+                    p.nationality,
+                    p.dateOfBirth && `DOB ${p.dateOfBirth}`,
+                    p.expiryDate && `expires ${p.expiryDate}`,
+                  ].filter(Boolean);
+                  return (
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      🛂 {bits.join(" · ")}
+                      {p.hasPhoto && " · photo on file"}
+                    </p>
+                  );
+                })()}
             </li>
           ))}
         </ul>
