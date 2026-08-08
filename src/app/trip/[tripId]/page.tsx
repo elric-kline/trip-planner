@@ -8,7 +8,7 @@ import { flagged } from "@/lib/conflicts.ts";
 import { attendingItems, rsvpsForItems } from "@/lib/attendance.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { getAssistantHistory } from "@/lib/assistant.ts";
-import { createInviteAction, shareItemAction } from "./actions.ts";
+import { createInviteAction, shareItemAction, setMemberRoleAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import AgreedDaysSection from "./AgreedDaysSection.tsx";
@@ -18,6 +18,7 @@ import { ItemList, ItemRow } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
+import { getPassportDetailsForUsers } from "@/lib/passport.ts";
 
 type Tab = "agreed" | "playspace" | "scratchpad";
 const TABS: { id: Tab; label: string }[] = [
@@ -73,6 +74,12 @@ export default async function TripPage({
   // Only fetched for the tab that actually shows it -- no point querying the
   // assistant's own conversation log on every other tab's render.
   const assistantHistory = activeTab === "scratchpad" ? await getAssistantHistory(access) : [];
+  // Only the planner ever sees passport info at all (see
+  // canViewMemberPassport) -- a participant never pays the decrypt cost for
+  // data they can't see anyway.
+  const passportByMember = access.isPlanner
+    ? await getPassportDetailsForUsers(access.members.map((m) => m.userId))
+    : new Map();
 
   const items = await listItems(access);
   // listItems is already scoped (see scope.ts's visibleToViewer) so any
@@ -91,7 +98,7 @@ export default async function TripPage({
   // "My Itinerary" -- required items automatically, optional items only
   // where the viewer said yes. Same rule conflictsForViewer builds its own
   // timeline from (see attendance.ts's attendingItems), so this is exactly
-  // what a Master Planner's-eye "View All" hides: whatever you declined or
+  // what a planner's-eye "View All" hides: whatever you declined or
   // never answered.
   const myLocked = attendingItems(locked, lockedRsvpMap, access.viewer.id);
   const visibleLocked = itineraryView === "all" ? locked : myLocked;
@@ -334,11 +341,30 @@ export default async function TripPage({
         <ul className="mb-3 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
           {access.members.map((m) => (
             <li key={m.userId} className="px-4 py-2 text-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span>{m.name ?? m.email}</span>
-                {m.role === "master_planner" && (
-                  <span className="badge bg-amber-100 text-amber-800">Planner</span>
-                )}
+                <div className="flex shrink-0 items-center gap-2">
+                  {m.role === "master_planner" && (
+                    <span className="badge bg-amber-100 text-amber-800">Planner</span>
+                  )}
+                  {m.role === "co_planner" && (
+                    <span className="badge bg-amber-50 text-amber-700">Co-planner</span>
+                  )}
+                  {access.isPlanner && m.userId !== access.viewer.id && m.role !== "master_planner" && (
+                    <form
+                      action={setMemberRoleAction.bind(
+                        null,
+                        tripId,
+                        m.userId,
+                        m.role === "co_planner" ? "participant" : "co_planner",
+                      )}
+                    >
+                      <button type="submit" className="text-xs text-stone-400 underline hover:text-stone-700">
+                        {m.role === "co_planner" ? "Revoke" : "Make co-planner"}
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
               {(m.dietaryRestrictions?.length || m.dietaryNotes) && (
                 <p className="mt-0.5 text-xs text-stone-500">
@@ -351,6 +377,36 @@ export default async function TripPage({
                     .join(" · ")}
                 </p>
               )}
+              {access.isPlanner &&
+                passportByMember.has(m.userId) &&
+                (() => {
+                  const p = passportByMember.get(m.userId)!;
+                  const bits = [
+                    p.fullName,
+                    p.passportNumber && `#${p.passportNumber}`,
+                    p.nationality,
+                    p.dateOfBirth && `DOB ${p.dateOfBirth}`,
+                    p.expiryDate && `expires ${p.expiryDate}`,
+                  ].filter(Boolean);
+                  return (
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      🛂 {bits.join(" · ")}
+                      {p.hasPhoto && (
+                        <>
+                          {" · "}
+                          <a
+                            href={`/api/trip/${tripId}/members/${m.userId}/passport-photo`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-teal-700 underline"
+                          >
+                            view photo
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
             </li>
           ))}
         </ul>

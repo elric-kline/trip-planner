@@ -1,0 +1,1 @@
+ALTER TYPE "public"."member_role" ADD VALUE 'co_planner' BEFORE 'participant';

@@ -41,6 +41,9 @@ export default async function TripsPage() {
                   {role === "master_planner" && (
                     <span className="badge bg-amber-100 text-amber-800">Planner</span>
                   )}
+                  {role === "co_planner" && (
+                    <span className="badge bg-amber-50 text-amber-700">Co-planner</span>
+                  )}
                   <span className="badge bg-stone-100 text-stone-700">
                     {PHASE_LABEL[derivePhase(trip)]}
                   </span>

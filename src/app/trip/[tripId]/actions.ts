@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth.ts";
 import { requireTripAccess, type Item } from "@/lib/scope.ts";
-import { createInvite } from "@/lib/trips.ts";
+import { createInvite, setMemberRole } from "@/lib/trips.ts";
 import {
   createItem,
   declineItem,
@@ -522,12 +522,30 @@ export async function updateTransportLegsAction(
 export async function createInviteAction(tripId: string, formData: FormData): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
-  if (!access.isPlanner) withError(tripId, new Error("Only a Master Planner can send invites."));
+  if (!access.isPlanner) withError(tripId, new Error("Only a planner can send invites."));
 
   const email = String(formData.get("email") ?? "").trim() || undefined;
   const invite = await createInvite(tripId, user, { email });
 
   redirect(`/trip/${tripId}?invite=${invite.token}`);
+}
+
+/** Appoints or revokes a co-planner -- see trips.ts's setMemberRole for the actual rules (unlimited, any existing planner may do it, the original master_planner is untouchable). */
+export async function setMemberRoleAction(
+  tripId: string,
+  memberId: string,
+  role: "co_planner" | "participant",
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+
+  try {
+    await setMemberRole(access, memberId, role);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+  redirect(`/trip/${tripId}`);
 }
 
 /** The "includes" checkboxes on a location's own form -- see days.ts's setLocationMembers. */

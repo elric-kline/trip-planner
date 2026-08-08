@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { acceptInvite, createInvite, createTrip, tripsForUser } from "./trips.ts";
+import { acceptInvite, createInvite, createTrip, setMemberRole, tripsForUser } from "./trips.ts";
 import { AccessError, requireTripAccess } from "./scope.ts";
 import { addLocation, listDays, locationMembersForLocations, unresolvedBranchesForMember } from "./days.ts";
-import { createTestUser, createTestTrip, cleanupTrip } from "./test-fixtures.ts";
+import { createTestUser, createTestTrip, addTripMember, cleanupTrip } from "./test-fixtures.ts";
 
 test("createTrip rejects a blank name and an end date before the start date", async (t) => {
   const owner = await createTestUser();
@@ -137,4 +137,119 @@ test("acceptInvite leaves an actual split day for the join wizard, not auto-reso
     new Set(branches[0].locations.map((l) => l.name)),
     new Set(["Bethlehem, PA", "New York, NY"]),
   );
+});
+
+test("setMemberRole: the master planner can appoint a participant as co_planner, and the appointment grants full isPlanner access", async (t) => {
+  const owner = await createTestUser();
+  const member = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, member.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, member.id]));
+
+  const ownerAccess = await requireTripAccess(trip.id, owner);
+  const before = await requireTripAccess(trip.id, member);
+  assert.equal(before.isPlanner, false);
+
+  await setMemberRole(ownerAccess, member.id, "co_planner");
+
+  const after = await requireTripAccess(trip.id, member);
+  assert.equal(after.role, "co_planner");
+  assert.equal(after.isPlanner, true, "a co_planner gets the same isPlanner access as the master");
+});
+
+test("setMemberRole: unlimited co-planners -- appointing several at once is not capped", async (t) => {
+  const owner = await createTestUser();
+  const a = await createTestUser();
+  const b = await createTestUser();
+  const c = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, a.id, "participant");
+  await addTripMember(trip.id, b.id, "participant");
+  await addTripMember(trip.id, c.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, a.id, b.id, c.id]));
+
+  let access = await requireTripAccess(trip.id, owner);
+  await setMemberRole(access, a.id, "co_planner");
+  access = await requireTripAccess(trip.id, owner); // refetch -- members is a snapshot from when access was loaded
+  await setMemberRole(access, b.id, "co_planner");
+  access = await requireTripAccess(trip.id, owner);
+  await setMemberRole(access, c.id, "co_planner");
+
+  const finalAccess = await requireTripAccess(trip.id, owner);
+  const coPlanners = finalAccess.members.filter((m) => m.role === "co_planner");
+  assert.equal(coPlanners.length, 3, "no cap on how many co-planners a trip can have");
+});
+
+test("setMemberRole: a co-planner may appoint further co-planners -- appointing isn't reserved to the master planner specifically", async (t) => {
+  const owner = await createTestUser();
+  const firstCoPlanner = await createTestUser();
+  const newMember = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, firstCoPlanner.id, "participant");
+  await addTripMember(trip.id, newMember.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, firstCoPlanner.id, newMember.id]));
+
+  const ownerAccess = await requireTripAccess(trip.id, owner);
+  await setMemberRole(ownerAccess, firstCoPlanner.id, "co_planner");
+
+  const coPlannerAccess = await requireTripAccess(trip.id, firstCoPlanner);
+  await setMemberRole(coPlannerAccess, newMember.id, "co_planner");
+
+  const finalAccess = await requireTripAccess(trip.id, owner);
+  assert.equal(finalAccess.members.find((m) => m.userId === newMember.id)?.role, "co_planner");
+});
+
+test("setMemberRole: revoking a co-planner puts them back to a plain participant, and revocation is symmetric with appointment", async (t) => {
+  const owner = await createTestUser();
+  const member = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, member.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, member.id]));
+
+  let access = await requireTripAccess(trip.id, owner);
+  await setMemberRole(access, member.id, "co_planner");
+  assert.equal((await requireTripAccess(trip.id, member)).isPlanner, true);
+
+  access = await requireTripAccess(trip.id, owner);
+  await setMemberRole(access, member.id, "participant");
+
+  const after = await requireTripAccess(trip.id, member);
+  assert.equal(after.role, "participant");
+  assert.equal(after.isPlanner, false);
+});
+
+test("setMemberRole: the master planner's own role can never be changed, not even by themselves", async (t) => {
+  const owner = await createTestUser();
+  const trip = await createTestTrip(owner);
+  t.after(() => cleanupTrip(trip.id, [owner.id]));
+
+  const access = await requireTripAccess(trip.id, owner);
+  await assert.rejects(() => setMemberRole(access, owner.id, "participant"));
+
+  assert.equal((await requireTripAccess(trip.id, owner)).role, "master_planner");
+});
+
+test("setMemberRole: a plain participant (not a planner at all) can't appoint or revoke anyone", async (t) => {
+  const owner = await createTestUser();
+  const participant = await createTestUser();
+  const other = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, participant.id, "participant");
+  await addTripMember(trip.id, other.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id, other.id]));
+
+  const participantAccess = await requireTripAccess(trip.id, participant);
+  await assert.rejects(() => setMemberRole(participantAccess, other.id, "co_planner"));
+
+  assert.equal((await requireTripAccess(trip.id, other)).role, "participant");
+});
+
+test("setMemberRole rejects a target who isn't actually on the trip", async (t) => {
+  const owner = await createTestUser();
+  const outsider = await createTestUser();
+  const trip = await createTestTrip(owner);
+  t.after(() => cleanupTrip(trip.id, [owner.id, outsider.id]));
+
+  const access = await requireTripAccess(trip.id, owner);
+  await assert.rejects(() => setMemberRole(access, outsider.id, "co_planner"));
 });

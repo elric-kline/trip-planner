@@ -61,7 +61,7 @@ export function checkLock(
     return ok;
   }
 
-  if (!actor.isPlanner) return no("Only a Master Planner can lock group items.");
+  if (!actor.isPlanner) return no("Only a planner can lock group items.");
   if (!commitment) return no("Choose whether this item is required or optional.");
   return ok;
 }
@@ -70,7 +70,7 @@ export function checkUnlock(item: LifecycleItem, actor: Actor): Check {
   if (item.status !== "locked") return no("This item isn't locked.");
   if (item.visibility === "private")
     return actor.isAuthor ? ok : no("Only its author can unlock a private item.");
-  return actor.isPlanner ? ok : no("Only a Master Planner can unlock group items.");
+  return actor.isPlanner ? ok : no("Only a planner can unlock group items.");
 }
 
 export function checkDecline(item: LifecycleItem, actor: Actor): Check {

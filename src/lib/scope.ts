@@ -4,7 +4,7 @@ import { items, tripMembers, trips, users } from "@/db/schema";
 import type { CurrentUser } from "./auth.ts";
 import { derivePhase, type TripPhase } from "./phase.ts";
 
-export type MemberRole = "master_planner" | "participant";
+export type MemberRole = "master_planner" | "co_planner" | "participant";
 
 export type DietaryTag = (typeof users.$inferSelect)["dietaryRestrictions"] extends (infer T)[] | null
   ? T
@@ -77,7 +77,7 @@ export async function requireTripAccess(
     trip,
     viewer,
     role: me.role,
-    isPlanner: me.role === "master_planner",
+    isPlanner: me.role === "master_planner" || me.role === "co_planner",
     members,
     phase: derivePhase(trip),
   };
@@ -131,8 +131,8 @@ export async function getItem(access: TripAccess, itemId: string): Promise<Item>
 }
 
 /**
- * Who may edit an item's own fields. The author keeps control until the
- * Master Planner locks it; after that the planner owns it.
+ * Who may edit an item's own fields. The author keeps control until a
+ * planner locks it; after that any planner owns it.
  */
 export function canEditItem(access: TripAccess, item: Item): boolean {
   if (item.status === "locked") return access.isPlanner;
