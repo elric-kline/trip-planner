@@ -251,7 +251,7 @@ export async function scheduleItemAction(
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function unscheduleItemAction(tripId: string, itemId: string): Promise<void> {
@@ -263,7 +263,7 @@ export async function unscheduleItemAction(tripId: string, itemId: string): Prom
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function lockItemAction(
@@ -296,7 +296,7 @@ export async function unlockItemAction(tripId: string, itemId: string): Promise<
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function declineItemAction(tripId: string, itemId: string): Promise<void> {
@@ -308,10 +308,20 @@ export async function declineItemAction(tripId: string, itemId: string): Promise
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
-/** Moves an item from Scratchpad to PlaySpace -- see items.ts's shareItem. */
+/**
+ * Moves an item from Scratchpad to PlaySpace -- see items.ts's shareItem.
+ * Deliberately no redirect, unlike its neighbors here: this one form is
+ * shared by two different pages (the trip page's own Scratchpad list, and
+ * the item detail page's "Share to PlaySpace" link -- see ScratchpadList
+ * in page.tsx). A hardcoded redirect target would be right for one and
+ * wrong for the other, so this stays revalidatePath-only; the item detail
+ * page's own copy of the button lives inside a page that gets a full
+ * redirect-driven refresh from every *other* action on it, so its stale-
+ * until-reload window is just this one link.
+ */
 export async function shareItemAction(tripId: string, itemId: string): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
@@ -333,7 +343,7 @@ export async function restoreItemAction(tripId: string, itemId: string): Promise
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function deleteItemAction(tripId: string, itemId: string): Promise<void> {
@@ -361,7 +371,7 @@ export async function setRsvpAction(
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function updateItemAction(
@@ -389,7 +399,7 @@ export async function updateItemAction(
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function updateLodgingDetailsAction(
@@ -416,7 +426,7 @@ export async function updateLodgingDetailsAction(
   } catch (err) {
     withError(tripId, err);
   }
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function updateDiningDetailsAction(
@@ -433,7 +443,7 @@ export async function updateDiningDetailsAction(
   } catch (err) {
     withError(tripId, err);
   }
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function updateTransportDetailsAction(
@@ -450,7 +460,7 @@ export async function updateTransportDetailsAction(
   } catch (err) {
     withError(tripId, err);
   }
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 /**
@@ -474,7 +484,7 @@ export async function updateTransportLegsAction(
     withError(tripId, err);
   }
   revalidatePath(`/trip/${tripId}`);
-  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+  redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
 export async function createInviteAction(tripId: string, formData: FormData): Promise<void> {
