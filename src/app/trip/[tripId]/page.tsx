@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scope.ts";
 import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
+import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
 import { flagged } from "@/lib/conflicts.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { createInviteAction, shareItemAction } from "./actions.ts";
@@ -88,7 +89,9 @@ export default async function TripPage({
   const playspaceIdeas = inPlay.filter((i) => !i.dayId);
   const playspaceDeclined = shared.filter((i) => i.status === "declined");
 
-  const findings = flagged(await conflictsForViewer(access));
+  // undefined keeps conflictsForViewer's own travel-time default (Haversine)
+  // -- only the flight-status provider needs picking here.
+  const findings = flagged(await conflictsForViewer(access, undefined, defaultFlightStatusProvider()));
   const dietaryFindings = await dietaryWarningsForViewer(access);
 
   const days = await listDays(access);

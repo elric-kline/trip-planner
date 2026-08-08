@@ -1,6 +1,13 @@
 import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { diningDetails, itemRsvps, items, lodgingDetails } from "@/db/schema";
+import {
+  diningDetails,
+  itemRsvps,
+  items,
+  lodgingDetails,
+  transportDetails,
+  transportLegs,
+} from "@/db/schema";
 import {
   checkDecline,
   checkLock,
@@ -243,6 +250,13 @@ export async function updateItemDetails(
   }
   if (patch.category && patch.category !== "dining") {
     await db.delete(diningDetails).where(eq(diningDetails.itemId, itemId));
+  }
+  if (patch.category && patch.category !== "transport") {
+    // Legs reference the item directly, not transportDetails -- both need
+    // dropping, same as upsertTransportDetails does when only the subtype
+    // (not the whole category) moves off "flight".
+    await db.delete(transportLegs).where(eq(transportLegs.itemId, itemId));
+    await db.delete(transportDetails).where(eq(transportDetails.itemId, itemId));
   }
 
   return updated;

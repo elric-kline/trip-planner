@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, canLockItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { previewLockImpact, type LockImpact } from "@/lib/conflicts-for.ts";
+import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
 import { lockItemAction } from "../../../actions.ts";
 
 function ImpactList({ impacts }: { impacts: LockImpact[] }) {
@@ -53,9 +54,14 @@ export default async function LockPreviewPage({
     redirect(`/trip/${tripId}/items/${itemId}`);
   }
 
+  // Same provider instance for both calls below -- each previewLockImpact
+  // call still does its own live-status lookups (there's no caching in
+  // AeroDataBoxFlightStatusProvider itself), this just avoids constructing
+  // it twice.
+  const flightStatusProvider = defaultFlightStatusProvider();
   const [requiredImpact, optionalImpact] = await Promise.all([
-    previewLockImpact(access, item, "required"),
-    previewLockImpact(access, item, "optional"),
+    previewLockImpact(access, item, "required", undefined, flightStatusProvider),
+    previewLockImpact(access, item, "optional", undefined, flightStatusProvider),
   ]);
 
   return (

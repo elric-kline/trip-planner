@@ -22,6 +22,13 @@ import {
 import { upsertLodgingDetails, type LodgingDetailsInput, type LodgingPaymentStatus } from "@/lib/lodging.ts";
 import { upsertDiningDetails, type DiningDetailsInput, type DiningPriceRange } from "@/lib/dining.ts";
 import {
+  upsertTransportDetails,
+  setTransportLegs,
+  type TransportDetailsInput,
+  type TransportLegInput,
+  type TransportSubtype,
+} from "@/lib/transport.ts";
+import {
   addLocation,
   moveLocation,
   removeLocation,
@@ -117,6 +124,57 @@ function hasAnyValue(input: Record<string, unknown>): boolean {
   return Object.values(input).some((v) => v !== null && !(Array.isArray(v) && v.length === 0));
 }
 
+/**
+ * Shared by the quick "Add something" form and the item detail page's
+ * transport edit form, same as parseLodgingFields/parseDiningFields --
+ * except subtype is always saved (never gated behind hasAnyValue) since
+ * it's a NOT NULL column, not an optional detail.
+ */
+function parseTransportFields(formData: FormData): TransportDetailsInput {
+  const str = (name: string) => String(formData.get(name) ?? "").trim() || null;
+  return {
+    subtype: (formData.get("subtype") as TransportSubtype) || "other",
+    international: formData.get("international") === "on",
+    confirmationNumber: str("confirmationNumber"),
+    bookedBy: str("bookedBy"),
+    bookingUrl: str("bookingUrl"),
+    costAmount: toNumberOrNull(formData.get("costAmount")),
+    costCurrency: str("costCurrency"),
+  };
+}
+
+/**
+ * Repeated same-name inputs across TransportLegsEditor's rows -- getAll
+ * returns them in document order, so index i across every field belongs to
+ * the same row. A row whose departs/arrives never got filled in (an "Add
+ * another leg" row left blank) is dropped rather than saved as invalid.
+ */
+function parseTransportLegs(formData: FormData, timeZone: string): TransportLegInput[] {
+  const str = (name: string) => formData.getAll(name).map((v) => String(v).trim() || null);
+  const airlines = str("airline");
+  const flightNumbers = str("flightNumber");
+  const departureAirports = str("departureAirport");
+  const arrivalAirports = str("arrivalAirport");
+  const departsAtValues = formData.getAll("departsAt");
+  const arrivesAtValues = formData.getAll("arrivesAt");
+
+  const legs: TransportLegInput[] = [];
+  for (let i = 0; i < departsAtValues.length; i++) {
+    const departsAt = localInputToDate(departsAtValues[i], timeZone);
+    const arrivesAt = localInputToDate(arrivesAtValues[i], timeZone);
+    if (!departsAt || !arrivesAt) continue;
+    legs.push({
+      airline: airlines[i] ?? null,
+      flightNumber: flightNumbers[i] ?? null,
+      departureAirport: departureAirports[i] ?? null,
+      arrivalAirport: arrivalAirports[i] ?? null,
+      departsAt,
+      arrivesAt,
+    });
+  }
+  return legs;
+}
+
 export async function createItemAction(tripId: string, formData: FormData): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
@@ -124,6 +182,7 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
   const locationName = String(formData.get("locationName") ?? "") || null;
   const lodging = category === "lodging" ? parseLodgingFields(formData, access.trip.timezone) : null;
   const dining = category === "dining" ? parseDiningFields(formData) : null;
+  const transport = category === "transport" ? parseTransportFields(formData) : null;
 
   // A lodging item's real location is its address, not the free-text
   // "Location" label — prefer that for the lookup when both are given.
@@ -158,6 +217,11 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
     }
     if (dining && hasAnyValue(dining)) {
       await upsertDiningDetails(access, created.id, dining);
+    }
+    // Always saved (not gated by hasAnyValue) once transport is picked --
+    // subtype is a required column, not an optional detail.
+    if (transport) {
+      await upsertTransportDetails(access, created.id, transport);
     }
   } catch (err) {
     withError(tripId, err);
@@ -369,6 +433,47 @@ export async function updateDiningDetailsAction(
   } catch (err) {
     withError(tripId, err);
   }
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+export async function updateTransportDetailsAction(
+  tripId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const transport = parseTransportFields(formData);
+
+  try {
+    await upsertTransportDetails(access, itemId, transport);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+/**
+ * Replace-all for a flight's legs -- see transport.ts's setTransportLegs.
+ * Also revalidates the trip page, not just the item's own, since saving
+ * legs can move the item's startsAt/endsAt (and so its position in the
+ * day's timeline).
+ */
+export async function updateTransportLegsAction(
+  tripId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  const legs = parseTransportLegs(formData, access.trip.timezone);
+
+  try {
+    await setTransportLegs(access, itemId, legs);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
   revalidatePath(`/trip/${tripId}/items/${itemId}`);
 }
 
