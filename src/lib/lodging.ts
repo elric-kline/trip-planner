@@ -10,6 +10,8 @@ export type LodgingPaymentStatus = NonNullable<LodgingDetails["paymentStatus"]>;
 export type LodgingDetailsInput = {
   address?: string | null;
   checkInInstructions?: string | null;
+  /** The property's own earliest-allowed check-in -- informational only. The item's own startsAt (set via scheduleItem) is the group's intended arrival and is what conflicts are judged against; see schema.ts's lodgingDetails doc comment. */
+  earliestCheckIn?: Date | null;
   contactName?: string | null;
   contactPhone?: string | null;
   contactEmail?: string | null;

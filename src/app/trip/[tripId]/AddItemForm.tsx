@@ -180,6 +180,14 @@ export default function AddItemForm({
             className="input"
             rows={2}
           />
+          <label className="text-sm">
+            <span className="mb-1 block text-stone-700">Earliest check-in (optional)</span>
+            <input type="datetime-local" name="earliestCheckIn" className="input" />
+            <span className="mt-1 block text-xs text-stone-400">
+              The property&apos;s own policy, e.g. front desk opens at 3 PM -- just informational. Arrival below is
+              what conflict checks use.
+            </span>
+          </label>
           <div className="grid grid-cols-3 gap-3">
             <input name="contactName" placeholder="Contact name (optional)" className="input" />
             <input name="contactPhone" placeholder="Contact phone" className="input" />
@@ -374,14 +382,20 @@ export default function AddItemForm({
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block text-sm">
-          <span className="mb-1 block text-stone-700">{isLodging ? "Check-in (optional)" : "Starts (optional)"}</span>
+          <span className="mb-1 block text-stone-700">{isLodging ? "Arrival (optional)" : "Starts (optional)"}</span>
           <input type="datetime-local" name="startsAt" className="input" />
         </label>
         <label className="block text-sm">
-          <span className="mb-1 block text-stone-700">{isLodging ? "Check-out (optional)" : "Ends (optional)"}</span>
+          <span className="mb-1 block text-stone-700">{isLodging ? "Departure (optional)" : "Ends (optional)"}</span>
           <input type="datetime-local" name="endsAt" className="input" />
         </label>
       </div>
+      {isLodging && (
+        <p className="-mt-2 text-xs text-stone-400">
+          When you actually plan to show up and leave -- this is what travel-time conflict checks use, not the
+          property&apos;s check-in policy above.
+        </p>
+      )}
       <div className="flex items-center gap-3">
         <button type="submit" className="btn-primary justify-self-start">
           Add

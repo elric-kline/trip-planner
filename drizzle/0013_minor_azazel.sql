@@ -1,0 +1,1 @@
+ALTER TABLE "lodging_details" ADD COLUMN "earliest_check_in" timestamp with time zone;
