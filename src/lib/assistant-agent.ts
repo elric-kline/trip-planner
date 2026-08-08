@@ -1,4 +1,4 @@
-import { callMessagesApi, textOf, type AnthropicContentBlock } from "./anthropic.ts";
+import { streamMessagesApi } from "./anthropic.ts";
 
 /**
  * The tool-using conversational loop itself, deliberately kept DB-free (see
@@ -24,6 +24,25 @@ export type ToolDefinition = Record<string, unknown>;
 export type ToolExecutors = Record<string, (input: Record<string, unknown>) => Promise<unknown>>;
 
 export type AgentOutcome = { reply: string } | { error: string };
+
+/**
+ * What streamAssistantTurn yields as a turn plays out. `text_delta` is a
+ * chunk of the final reply's own text, in order, meant to be appended
+ * directly to whatever's rendered so far -- exactly the pieces a plain
+ * end_turn reply's text is made of, not a separate summary. `tool_start`
+ * fires once a tool call's name is known (before its input has finished
+ * streaming in), for a "looking that up..." indicator -- nothing about the
+ * call's outcome is available yet at that point. Exactly one of `done`/
+ * `error` always ends the sequence.
+ */
+export type AgentStreamEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_start"; name: string }
+  | { type: "done"; reply: string }
+  | { type: "error"; message: string };
+
+/** One content block as accumulated across a streamed round's deltas, before being reshaped back into the `content` array format a non-streaming response (and the next round's request) uses. */
+type StreamedBlock = { type: string; text?: string; id?: string; name?: string; inputJson?: string };
 
 const MODEL = "claude-sonnet-5";
 const LOG_PREFIX = "[assistant]";
@@ -55,13 +74,92 @@ const PER_CALL_TIMEOUT_MS = 20_000;
 const MIN_ROUND_TIMEOUT_MS = 8_000;
 
 /**
- * Runs one user turn to completion: sends `userMessage` (with `history` as
- * prior context) to Claude, executing whatever tools it calls -- server
- * tools like web_search resume on their own (see the pause_turn branch,
- * same pattern as cuisine-inference.ts's single-tool version, just looped);
- * custom tools call into `executors` and their result is handed back --
- * until it produces a final text reply, the round budget runs out, or the
- * overall time budget runs out (see OVERALL_BUDGET_MS above).
+ * One round's worth of streamed events, reduced down to the same shape a
+ * non-streaming response would have had: content blocks in order (text
+ * accumulated from its deltas, a tool_use's `input` parsed from its
+ * accumulated partial JSON) plus the round's stop_reason. Yields
+ * `text_delta` as text arrives and `tool_start` the moment a tool_use
+ * block's name is known, same contract as streamAssistantTurn itself.
+ *
+ * `sawMessageStart` distinguishes a real (if terminated early) response
+ * from the request never landing at all -- streamMessagesApi yields
+ * nothing in either case, and only the former has anything worth reasoning
+ * about (see callMessagesApi's `null` for the equivalent non-streaming
+ * signal).
+ */
+async function* streamOneRound(
+  apiKey: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): AsyncGenerator<AgentStreamEvent, { content: Record<string, unknown>[]; stopReason?: string; sawMessageStart: boolean }> {
+  const blocks = new Map<number, StreamedBlock>();
+  let stopReason: string | undefined;
+  let sawMessageStart = false;
+
+  for await (const event of streamMessagesApi(apiKey, body, timeoutMs, LOG_PREFIX)) {
+    if (event.type === "message_start") {
+      sawMessageStart = true;
+    } else if (event.type === "content_block_start") {
+      const index = event.index as number;
+      const contentBlock = event.content_block as Record<string, unknown>;
+      const type = contentBlock.type as string;
+      blocks.set(index, {
+        type,
+        text: typeof contentBlock.text === "string" ? contentBlock.text : "",
+        id: typeof contentBlock.id === "string" ? contentBlock.id : undefined,
+        name: typeof contentBlock.name === "string" ? contentBlock.name : undefined,
+        inputJson: "",
+      });
+      if (type === "tool_use" && typeof contentBlock.name === "string") {
+        yield { type: "tool_start", name: contentBlock.name };
+      }
+    } else if (event.type === "content_block_delta") {
+      const index = event.index as number;
+      const block = blocks.get(index);
+      const delta = event.delta as Record<string, unknown>;
+      if (!block) continue;
+      if (delta.type === "text_delta" && typeof delta.text === "string") {
+        block.text = (block.text ?? "") + delta.text;
+        yield { type: "text_delta", text: delta.text };
+      } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
+        block.inputJson = (block.inputJson ?? "") + delta.partial_json;
+      }
+    } else if (event.type === "message_delta") {
+      const delta = event.delta as Record<string, unknown>;
+      if (typeof delta.stop_reason === "string") stopReason = delta.stop_reason;
+    }
+    // message_stop, ping, content_block_stop, error -- nothing else to do with these.
+  }
+
+  const content = [...blocks.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, block]) => {
+      if (block.type === "tool_use") {
+        let input: Record<string, unknown> = {};
+        try {
+          input = block.inputJson ? (JSON.parse(block.inputJson) as Record<string, unknown>) : {};
+        } catch {
+          input = {};
+        }
+        return { type: "tool_use", id: block.id, name: block.name, input };
+      }
+      if (block.type === "text") return { type: "text", text: block.text ?? "" };
+      return { type: block.type }; // server_tool_use and anything else -- passed through as-is
+    });
+
+  return { content, stopReason, sawMessageStart };
+}
+
+/**
+ * Runs one user turn to completion, streaming as it goes: sends
+ * `userMessage` (with `history` as prior context) to Claude, yielding
+ * `text_delta`s as the reply is written and `tool_start`s as tools are
+ * called -- server tools like web_search resume on their own (see the
+ * pause_turn branch, same pattern as cuisine-inference.ts's single-tool
+ * version, just looped and streamed); custom tools call into `executors`
+ * and their result is handed back -- until a final `done`/`error` event,
+ * once the model produces a final text reply, the round budget runs out,
+ * or the overall time budget runs out (see OVERALL_BUDGET_MS above).
  *
  * `history` is plain prior turns, not the raw tool-call blocks a previous
  * turn's own loop produced -- see schema.ts's assistantMessages doc for why
@@ -72,7 +170,7 @@ const MIN_ROUND_TIMEOUT_MS = 8_000;
  * need to exercise the early-exit path deterministically without actually
  * waiting out the real budget.
  */
-export async function runAssistantTurn(
+export async function* streamAssistantTurn(
   apiKey: string,
   systemPrompt: string,
   history: AgentTurn[],
@@ -80,7 +178,7 @@ export async function runAssistantTurn(
   tools: ToolDefinition[],
   executors: ToolExecutors,
   budgetMs: number = OVERALL_BUDGET_MS,
-): Promise<AgentOutcome> {
+): AsyncGenerator<AgentStreamEvent> {
   const messages: Record<string, unknown>[] = [
     ...history.map((t) => ({ role: t.role, content: t.content })),
     { role: "user", content: userMessage },
@@ -97,28 +195,46 @@ export async function runAssistantTurn(
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const remaining = budgetMs - (Date.now() - startedAt);
     if (remaining < MIN_ROUND_TIMEOUT_MS) {
-      return { error: "That's taking longer than expected — try asking again, maybe more specifically." };
+      yield { type: "error", message: "That's taking longer than expected — try asking again, maybe more specifically." };
+      return;
     }
 
-    const response = await callMessagesApi(apiKey, { ...baseBody, messages }, Math.min(PER_CALL_TIMEOUT_MS, remaining), LOG_PREFIX);
-    if (!response) return { error: "The trip assistant couldn't be reached — try again in a moment." };
-    if (response.stop_reason === "refusal") {
-      return { error: "The assistant didn't have a response for that -- try rephrasing." };
+    const roundStream = streamOneRound(apiKey, { ...baseBody, messages }, Math.min(PER_CALL_TIMEOUT_MS, remaining));
+    let roundResult: { content: Record<string, unknown>[]; stopReason?: string; sawMessageStart: boolean };
+    while (true) {
+      const step = await roundStream.next();
+      if (step.done) {
+        roundResult = step.value;
+        break;
+      }
+      yield step.value;
+    }
+    const { content, stopReason, sawMessageStart } = roundResult;
+
+    if (!sawMessageStart) {
+      yield { type: "error", message: "The trip assistant couldn't be reached — try again in a moment." };
+      return;
+    }
+    if (stopReason === "refusal") {
+      yield { type: "error", message: "The assistant didn't have a response for that -- try rephrasing." };
+      return;
     }
 
-    if (response.stop_reason === "pause_turn") {
+    if (stopReason === "pause_turn") {
       // A server tool (web_search) is still working -- Anthropic resumes it
       // automatically once the prior assistant turn (including its
       // server_tool_use block) is sent back; no tool_result needed here.
-      messages.push({ role: "assistant", content: response.content });
+      messages.push({ role: "assistant", content });
       continue;
     }
 
-    if (response.stop_reason === "tool_use") {
-      messages.push({ role: "assistant", content: response.content });
+    if (stopReason === "tool_use") {
+      messages.push({ role: "assistant", content });
       const toolResults = await Promise.all(
-        (response.content ?? [])
-          .filter((b): b is AnthropicContentBlock & { id: string; name: string } => b.type === "tool_use" && Boolean(b.id) && Boolean(b.name))
+        content
+          .filter((b): b is { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } =>
+            b.type === "tool_use" && Boolean(b.id) && Boolean(b.name),
+          )
           .map(async (block) => {
             const executor = executors[block.name];
             let output: unknown;
@@ -139,9 +255,37 @@ export async function runAssistantTurn(
     }
 
     // end_turn (or any other terminal reason) -- this is the final answer.
-    const text = textOf(response);
-    return { reply: text || "I don't have anything to add there." };
+    const text = content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+    yield { type: "done", reply: text || "I don't have anything to add there." };
+    return;
   }
 
-  return { error: "That took more back-and-forth than expected — try asking again, maybe more specifically." };
+  yield { type: "error", message: "That took more back-and-forth than expected — try asking again, maybe more specifically." };
+}
+
+/**
+ * Non-streaming convenience wrapper over streamAssistantTurn, for callers
+ * that only want the final outcome (e.g. a script, or a test that doesn't
+ * care about incremental delivery) -- drains the stream and discards the
+ * `text_delta`/`tool_start` events along the way.
+ */
+export async function runAssistantTurn(
+  apiKey: string,
+  systemPrompt: string,
+  history: AgentTurn[],
+  userMessage: string,
+  tools: ToolDefinition[],
+  executors: ToolExecutors,
+  budgetMs: number = OVERALL_BUDGET_MS,
+): Promise<AgentOutcome> {
+  for await (const event of streamAssistantTurn(apiKey, systemPrompt, history, userMessage, tools, executors, budgetMs)) {
+    if (event.type === "done") return { reply: event.reply };
+    if (event.type === "error") return { error: event.message };
+  }
+  // Unreachable in practice -- streamAssistantTurn always ends on done/error -- but keeps this total.
+  return { error: "The trip assistant couldn't be reached — try again in a moment." };
 }

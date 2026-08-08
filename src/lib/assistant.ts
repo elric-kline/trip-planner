@@ -10,6 +10,7 @@ import { listDays, locationsForDays, locationMembersForLocations, type DayLocati
 import { formatCalendarDate } from "./time.ts";
 import {
   runAssistantTurn,
+  streamAssistantTurn,
   type AgentTurn,
   type ToolDefinition,
   type ToolExecutors,
@@ -349,6 +350,12 @@ export type AssistantReply = { reply: string; pinned: Item[] };
  * drops what someone typed), and returns the reply plus whatever got
  * pinned along the way. Anyone on the trip may use their own thread here --
  * no planner/author gate, same as any other Scratchpad activity.
+ *
+ * Non-streaming: waits for the whole reply before returning. Kept around
+ * (rather than only the streaming version below) as a plain async
+ * request/response API for anything that doesn't need incremental
+ * delivery -- a script, a test, a future non-UI caller. The chat UI itself
+ * uses streamAssistantMessage instead; see AssistantChat.tsx.
  */
 export async function sendAssistantMessage(access: TripAccess, userMessage: string): Promise<AssistantReply> {
   const text = userMessage.trim();
@@ -371,4 +378,60 @@ export async function sendAssistantMessage(access: TripAccess, userMessage: stri
 
   await appendMessage(access, "assistant", reply);
   return { reply, pinned };
+}
+
+/**
+ * What a caller watching a live turn sees, in order: any number of
+ * `text_delta`/`tool_start` events (see assistant-agent.ts's
+ * AgentStreamEvent -- these pass straight through), then exactly one
+ * `done`. There's deliberately no separate `error` variant here -- an
+ * internal failure (network, refusal, budget) is folded into `done` the
+ * same plain-text way sendAssistantMessage above always has been, so it's
+ * persisted and replayed as an ordinary assistant turn either way; a
+ * caller that only cares about the final text doesn't need to branch on
+ * two cases that both mean "here's what to show."
+ */
+export type AssistantStreamEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_start"; name: string }
+  | { type: "done"; reply: string; pinned: { id: string; title: string }[] };
+
+/**
+ * Same contract as sendAssistantMessage (persists both turns, the user's
+ * message even if everything after it fails) but yields the reply as it's
+ * written instead of only returning once it's complete -- what backs the
+ * streaming /api/trip/[tripId]/assistant route AssistantChat.tsx talks to,
+ * so a reply appears incrementally instead of the whole page waiting on
+ * (and then reloading for) one big response.
+ */
+export async function* streamAssistantMessage(access: TripAccess, userMessage: string): AsyncGenerator<AssistantStreamEvent> {
+  const text = userMessage.trim();
+  if (!text) throw new RuleError("Say something first.");
+
+  const priorHistory = await getAssistantHistory(access);
+  await appendMessage(access, "user", text);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    const reply = "The trip assistant isn't configured yet — ask whoever runs this app to set ANTHROPIC_API_KEY.";
+    await appendMessage(access, "assistant", reply);
+    yield { type: "done", reply, pinned: [] };
+    return;
+  }
+
+  const systemPrompt = await buildSystemPrompt(access);
+  const pinned: Item[] = [];
+  let reply = "";
+  for await (const event of streamAssistantTurn(apiKey, systemPrompt, priorHistory, text, TOOLS, buildExecutors(access, pinned))) {
+    if (event.type === "text_delta" || event.type === "tool_start") {
+      yield event;
+    } else if (event.type === "done") {
+      reply = event.reply;
+    } else {
+      reply = event.message;
+    }
+  }
+
+  await appendMessage(access, "assistant", reply);
+  yield { type: "done", reply, pinned: pinned.map((p) => ({ id: p.id, title: p.title })) };
 }

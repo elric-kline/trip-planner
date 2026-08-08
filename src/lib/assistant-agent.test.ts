@@ -1,19 +1,62 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runAssistantTurn, type ToolDefinition, type ToolExecutors } from "./assistant-agent.ts";
+import { runAssistantTurn, streamAssistantTurn, type AgentStreamEvent, type ToolDefinition, type ToolExecutors } from "./assistant-agent.ts";
 
-function textResponse(text: string, stop_reason = "end_turn") {
-  return new Response(JSON.stringify({ content: [{ type: "text", text }], stop_reason }), { status: 200 });
+/**
+ * Builds a fake Anthropic streaming (SSE) response. `chunks` lets a test
+ * split a text reply across more than one delta, the way a real stream
+ * actually arrives -- most tests don't care and just pass one chunk.
+ * `new Response(string, ...)` gives a real ReadableStream body (verified
+ * against Node's own fetch/Response globals), so this is read by
+ * streamMessagesApi exactly like a real network response would be.
+ */
+function sseEvent(obj: object): string {
+  return `data: ${JSON.stringify(obj)}\n\n`;
 }
 
-function toolUseResponse(calls: { id: string; name: string; input: Record<string, unknown> }[]) {
-  return new Response(
-    JSON.stringify({
-      content: calls.map((c) => ({ type: "tool_use", id: c.id, name: c.name, input: c.input })),
-      stop_reason: "tool_use",
-    }),
-    { status: 200 },
+type FakeBlock =
+  | { type: "text"; chunks: string[] }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
+
+function sseResponse(blocks: FakeBlock[], stopReason: string): Response {
+  const frames: string[] = [sseEvent({ type: "message_start", message: { id: "msg_1", role: "assistant", content: [] } })];
+  blocks.forEach((block, index) => {
+    if (block.type === "text") {
+      frames.push(sseEvent({ type: "content_block_start", index, content_block: { type: "text", text: "" } }));
+      for (const chunk of block.chunks) {
+        frames.push(sseEvent({ type: "content_block_delta", index, delta: { type: "text_delta", text: chunk } }));
+      }
+      frames.push(sseEvent({ type: "content_block_stop", index }));
+    } else {
+      frames.push(
+        sseEvent({ type: "content_block_start", index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } }),
+      );
+      frames.push(
+        sseEvent({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } }),
+      );
+      frames.push(sseEvent({ type: "content_block_stop", index }));
+    }
+  });
+  frames.push(sseEvent({ type: "message_delta", delta: { stop_reason: stopReason } }));
+  frames.push(sseEvent({ type: "message_stop" }));
+  return new Response(frames.join(""), { status: 200 });
+}
+
+function textResponse(text: string, stopReason = "end_turn"): Response {
+  return sseResponse(text ? [{ type: "text", chunks: [text] }] : [], stopReason);
+}
+
+function toolUseResponse(calls: { id: string; name: string; input: Record<string, unknown> }[]): Response {
+  return sseResponse(
+    calls.map((c) => ({ type: "tool_use" as const, id: c.id, name: c.name, input: c.input })),
+    "tool_use",
   );
+}
+
+async function collect(gen: AsyncGenerator<AgentStreamEvent>): Promise<AgentStreamEvent[]> {
+  const events: AgentStreamEvent[] = [];
+  for await (const event of gen) events.push(event);
+  return events;
 }
 
 const NO_TOOLS: ToolDefinition[] = [];
@@ -26,10 +69,11 @@ test("a plain end_turn reply with no tool use", async (t) => {
   assert.deepEqual(result, { reply: "Grab-and-go near a walkable area sounds great." });
 });
 
-test("sends prior history plus the new user message, in order, with the system prompt attached", async (t) => {
+test("sends prior history plus the new user message, in order, with the system prompt attached, and asks Anthropic to stream", async (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async (_url: unknown, init: unknown) => {
     const body = JSON.parse((init as RequestInit).body as string);
     assert.equal(body.system, "SYSTEM");
+    assert.equal(body.stream, true);
     assert.deepEqual(body.messages, [
       { role: "user", content: "first" },
       { role: "assistant", content: "reply to first" },
@@ -50,6 +94,38 @@ test("sends prior history plus the new user message, in order, with the system p
     NO_EXECUTORS,
   );
   assert.equal(fetchMock.mock.calls.length, 1);
+});
+
+test("streamAssistantTurn yields each text delta in order as it arrives, then a final done with the whole reply", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    sseResponse([{ type: "text", chunks: ["Grab-and-go ", "near a walkable ", "area sounds great."] }], "end_turn"),
+  );
+
+  const events = await collect(streamAssistantTurn("key", "sys", [], "any lunch ideas?", NO_TOOLS, NO_EXECUTORS));
+  assert.deepEqual(events, [
+    { type: "text_delta", text: "Grab-and-go " },
+    { type: "text_delta", text: "near a walkable " },
+    { type: "text_delta", text: "area sounds great." },
+    { type: "done", reply: "Grab-and-go near a walkable area sounds great." },
+  ]);
+});
+
+test("streamAssistantTurn yields a tool_start as soon as a tool call's name is known, before its result comes back", async (t) => {
+  const executors: ToolExecutors = { estimate_travel: async () => ({ minutes: 12, mode: "walk" }) };
+  const fetchMock = t.mock.method(globalThis, "fetch", async (_url: unknown, init: unknown) => {
+    if (fetchMock.mock.calls.length === 0) {
+      return toolUseResponse([{ id: "call_1", name: "estimate_travel", input: { fromLat: 1, fromLng: 2, toLat: 3, toLng: 4 } }]);
+    }
+    void init;
+    return textResponse("It's a 12-minute walk.");
+  });
+
+  const events = await collect(streamAssistantTurn("key", "sys", [], "how far is that?", NO_TOOLS, executors));
+  assert.deepEqual(events, [
+    { type: "tool_start", name: "estimate_travel" },
+    { type: "text_delta", text: "It's a 12-minute walk." },
+    { type: "done", reply: "It's a 12-minute walk." },
+  ]);
 });
 
 test("a pause_turn (server tool still working) resumes by resending the prior assistant turn, no tool_result", async (t) => {
@@ -174,6 +250,16 @@ test("a network failure returns an error outcome instead of throwing", async (t)
 
   const result = await runAssistantTurn("key", "sys", [], "anything", NO_TOOLS, NO_EXECUTORS);
   assert.ok("error" in result);
+});
+
+test("a response that never really lands (no message_start at all) is treated as unreachable, not a silent empty reply", async (t) => {
+  // A stream that opens but sends nothing recognizable back -- e.g. a proxy
+  // that returns 200 with an empty body instead of erroring outright.
+  t.mock.method(globalThis, "fetch", async () => new Response("", { status: 200 }));
+
+  const result = await runAssistantTurn("key", "sys", [], "anything", NO_TOOLS, NO_EXECUTORS);
+  assert.ok("error" in result);
+  assert.match((result as { error: string }).error, /couldn't be reached/);
 });
 
 test("a tool loop that never reaches a terminal reply gives up after the round budget instead of looping forever", async (t) => {

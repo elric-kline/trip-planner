@@ -4,6 +4,8 @@ import {
   getAssistantHistory,
   clearAssistantHistory,
   sendAssistantMessage,
+  streamAssistantMessage,
+  type AssistantStreamEvent,
 } from "./assistant.ts";
 import { RuleError, createItem, lockItem, scheduleItem, setRsvp } from "./items.ts";
 import { listItems, requireTripAccess } from "./scope.ts";
@@ -14,18 +16,41 @@ function clearEnv() {
   delete process.env.ANTHROPIC_API_KEY;
 }
 
+/**
+ * assistant.ts talks to Anthropic via streamAssistantTurn now (see
+ * assistant-agent.ts), which always requests `stream: true` -- these build
+ * a fake SSE response, same approach as assistant-agent.test.ts's own
+ * helpers, since a plain one-shot JSON Response no longer matches what
+ * streamMessagesApi reads.
+ */
+function sseEvent(obj: object): string {
+  return `data: ${JSON.stringify(obj)}\n\n`;
+}
+
 function textResponse(text: string, stop_reason = "end_turn") {
-  return new Response(JSON.stringify({ content: [{ type: "text", text }], stop_reason }), { status: 200 });
+  const frames = [sseEvent({ type: "message_start", message: { id: "msg_1", role: "assistant", content: [] } })];
+  if (text) {
+    frames.push(
+      sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+      sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }),
+      sseEvent({ type: "content_block_stop", index: 0 }),
+    );
+  }
+  frames.push(sseEvent({ type: "message_delta", delta: { stop_reason } }), sseEvent({ type: "message_stop" }));
+  return new Response(frames.join(""), { status: 200 });
 }
 
 function toolUseResponse(calls: { id: string; name: string; input: Record<string, unknown> }[]) {
-  return new Response(
-    JSON.stringify({
-      content: calls.map((c) => ({ type: "tool_use", id: c.id, name: c.name, input: c.input })),
-      stop_reason: "tool_use",
-    }),
-    { status: 200 },
-  );
+  const frames = [sseEvent({ type: "message_start", message: { id: "msg_1", role: "assistant", content: [] } })];
+  calls.forEach((c, index) => {
+    frames.push(
+      sseEvent({ type: "content_block_start", index, content_block: { type: "tool_use", id: c.id, name: c.name, input: {} } }),
+      sseEvent({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(c.input) } }),
+      sseEvent({ type: "content_block_stop", index }),
+    );
+  });
+  frames.push(sseEvent({ type: "message_delta", delta: { stop_reason: "tool_use" } }), sseEvent({ type: "message_stop" }));
+  return new Response(frames.join(""), { status: 200 });
 }
 
 async function setupTrip() {
@@ -315,4 +340,75 @@ test("tool calls with missing or invalid input degrade to an error result instea
   assert.match(errors[0], /placeId/);
   assert.match(errors[1], /four finite numbers/);
   assert.match(errors[2], /title/);
+});
+
+test("streamAssistantMessage yields text deltas as they arrive, then a final done carrying the same reply sendAssistantMessage would persist", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => {
+    clearEnv();
+    return cleanupTrip(trip.id, userIds);
+  });
+
+  process.env.ANTHROPIC_API_KEY = "test_key";
+  t.mock.method(globalThis, "fetch", async () => {
+    const frames = [
+      sseEvent({ type: "message_start", message: { id: "msg_1", role: "assistant", content: [] } }),
+      sseEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+      sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Sure, " } }),
+      sseEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "here you go." } }),
+      sseEvent({ type: "content_block_stop", index: 0 }),
+      sseEvent({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      sseEvent({ type: "message_stop" }),
+    ];
+    return new Response(frames.join(""), { status: 200 });
+  });
+
+  const events: AssistantStreamEvent[] = [];
+  for await (const event of streamAssistantMessage(plannerAccess, "any lunch ideas?")) events.push(event);
+
+  assert.deepEqual(events, [
+    { type: "text_delta", text: "Sure, " },
+    { type: "text_delta", text: "here you go." },
+    { type: "done", reply: "Sure, here you go.", pinned: [] },
+  ]);
+
+  // Persisted exactly like the non-streaming path -- the point of
+  // streaming is delivery, not a different stored conversation.
+  assert.deepEqual(await getAssistantHistory(plannerAccess), [
+    { role: "user", content: "any lunch ideas?" },
+    { role: "assistant", content: "Sure, here you go." },
+  ]);
+});
+
+test("streamAssistantMessage yields a tool_start for a pin_idea call, and the final done's pinned list is trimmed to id/title", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => {
+    clearEnv();
+    return cleanupTrip(trip.id, userIds);
+  });
+
+  process.env.ANTHROPIC_API_KEY = "test_key";
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    if (fetchMock.mock.calls.length === 0) {
+      return toolUseResponse([{ id: "call_1", name: "pin_idea", input: { title: "Pike Place Chowder", category: "dining" } }]);
+    }
+    return textResponse("Pinned it.");
+  });
+
+  const events: AssistantStreamEvent[] = [];
+  for await (const event of streamAssistantMessage(plannerAccess, "pin that one")) events.push(event);
+
+  assert.deepEqual(events[0], { type: "tool_start", name: "pin_idea" });
+
+  const items = await listItems(plannerAccess);
+  const created = items.find((i) => i.title === "Pike Place Chowder");
+  assert.ok(created, "pin_idea actually created the item");
+  assert.equal(created?.visibility, "private");
+
+  const done = events[events.length - 1];
+  assert.deepEqual(done, {
+    type: "done",
+    reply: "Pinned it.",
+    pinned: [{ id: created?.id, title: "Pike Place Chowder" }],
+  });
 });
