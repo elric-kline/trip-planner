@@ -6,6 +6,8 @@ import { rsvpsForItems } from "./attendance.ts";
 import { createItem, RuleError } from "./items.ts";
 import { searchRestaurants, getPlaceDetails } from "./places.ts";
 import { HaversineTravelTimeProvider, inferMode, type Coordinates } from "./travel.ts";
+import { listDays, locationsForDays, locationMembersForLocations, type DayLocationKind, type TripDayLocation } from "./days.ts";
+import { formatCalendarDate } from "./time.ts";
 import {
   runAssistantTurn,
   type AgentTurn,
@@ -99,6 +101,70 @@ async function describeLockedGroupItems(access: TripAccess, items: Item[]): Prom
   });
 }
 
+/** One kind's locations for a day, rendered as "Place A" or, for a split, "Place A (Sam) / Place B (Alex, Jordan)" -- the member parenthetical is only added when it's not simply everyone, same restraint as describeLockedGroupItems. */
+function describeLocationsOfKind(
+  access: TripAccess,
+  locations: TripDayLocation[],
+  membersByLocation: Map<string, string[]>,
+): string {
+  return locations
+    .map((loc) => {
+      const memberIds = membersByLocation.get(loc.id) ?? [];
+      const everyone = access.members.every((m) => memberIds.includes(m.userId));
+      if (everyone) return loc.name;
+      const names = memberIds.map((id) => memberName(access, id));
+      return `${loc.name} (${names.length > 0 ? names.join(", ") : "no one yet"})`;
+    })
+    .join(" / ");
+}
+
+/** One line per day that actually has a wake/stop/sleep location set -- days with nothing entered yet are left out entirely rather than printed as "nothing planned," which would just be noise. */
+function describeDayLine(
+  access: TripAccess,
+  date: string,
+  byKind: Map<DayLocationKind, TripDayLocation[]>,
+  membersByLocation: Map<string, string[]>,
+): string | null {
+  const wake = byKind.get("wake") ?? [];
+  const stop = byKind.get("stop") ?? [];
+  const sleep = byKind.get("sleep") ?? [];
+  if (wake.length === 0 && stop.length === 0 && sleep.length === 0) return null;
+
+  const parts = [
+    wake.length > 0 ? `wakes in ${describeLocationsOfKind(access, wake, membersByLocation)}` : null,
+    stop.length > 0 ? `stops: ${describeLocationsOfKind(access, stop, membersByLocation)}` : null,
+    sleep.length > 0 ? `sleeps in ${describeLocationsOfKind(access, sleep, membersByLocation)}` : null,
+  ].filter((p): p is string => Boolean(p));
+  return `${formatCalendarDate(date)}: ${parts.join("; ")}`;
+}
+
+/**
+ * The trip's actual day-by-day geography -- where the group wakes up,
+ * passes through, and sleeps each night (see days.ts's tripDayLocations
+ * comment for why this is tracked independently of any lodging item's
+ * check-in/out). This is what lets the assistant answer "what time's
+ * sunset on our first day in Seattle" correctly on a multi-city trip,
+ * instead of only knowing the trip's single overall destination field --
+ * a Vancouver-titled trip can easily wake its first day in Seattle.
+ */
+async function describeDayLocations(access: TripAccess): Promise<string[]> {
+  const days = await listDays(access);
+  const locationsByDay = await locationsForDays(days.map((d) => d.id));
+  const allLocationIds = [...locationsByDay.values()].flat().map((l) => l.id);
+  const membersByLocation = await locationMembersForLocations(allLocationIds);
+
+  const lines: string[] = [];
+  for (const day of days) {
+    const byKind = new Map<DayLocationKind, TripDayLocation[]>();
+    for (const loc of locationsByDay.get(day.id) ?? []) {
+      byKind.set(loc.kind, [...(byKind.get(loc.kind) ?? []), loc]);
+    }
+    const line = describeDayLine(access, day.date, byKind, membersByLocation);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
 /**
  * Rebuilt fresh for every message -- never cached across turns -- so a
  * lock, an RSVP, or a new idea made moments ago is always what the
@@ -118,11 +184,15 @@ async function buildSystemPrompt(access: TripAccess): Promise<string> {
   );
 
   const lockedGroupLines = await describeLockedGroupItems(access, lockedGroup);
+  const dayLocationLines = await describeDayLocations(access);
   const tz = access.trip.timezone;
 
   const sections = [
     `You are the trip assistant for "${access.trip.name}" (${access.trip.destination}, ${access.trip.startDate} to ${access.trip.endDate}, timezone ${tz}). You're chatting with ${memberName(access, access.viewer.id)} in their own Scratchpad -- private brainstorming space only they can see.`,
     `Trip members: ${access.members.map((m) => m.name ?? m.email).join(", ")}.`,
+    dayLocationLines.length > 0
+      ? `DAY-BY-DAY LOCATIONS (where the group actually wakes up, passes through, and sleeps each night -- this is the real geography to reason from, not just the trip's overall destination above, since a multi-city trip can wake or stop somewhere else entirely on a given day; a "(name, name)" tag means only those people are there, not everyone):\n${dayLocationLines.map((l) => `- ${l}`).join("\n")}`
+      : "No day-by-day wake/stop/sleep locations have been entered yet -- the trip's overall destination above is all that's known about where the group is each day.",
     lockedGroupLines.length > 0
       ? `LOCKED PLAN (the group's settled itinerary):\n${lockedGroupLines.map((l) => `- ${l}`).join("\n")}`
       : "Nothing is locked in yet.",
@@ -138,6 +208,8 @@ async function buildSystemPrompt(access: TripAccess): Promise<string> {
     `You have tools to search for real places, look up a specific place's exact address and coordinates, estimate real travel time between two points, and save a suggestion as a new private Scratchpad idea ("pin" it) when asked.
 
 Ground concrete suggestions in real places using the search/details tools rather than inventing a name or address. Before claiming something is close to (or far from) another stop -- the airport, a locked item, another suggestion in this conversation -- use the travel-time tool on their actual coordinates instead of guessing from geography knowledge alone; don't assume two places are near each other just because they're in the same city.
+
+When a question depends on where the group is on a given day (sunset time, weather, "our first day in ___," what's walkable), check DAY-BY-DAY LOCATIONS above rather than assuming the whole trip happens in the overall destination -- multi-city trips wake, stop, or sleep somewhere else entirely on plenty of days. If the day/city someone names genuinely isn't in that list, say so plainly and ask rather than guessing.
 
 When asked to "pin" one or more of your own suggestions, call the pin tool once per item, using the exact place details you already looked up -- never invent coordinates. Confirm what got pinned in plain language afterward.
 
