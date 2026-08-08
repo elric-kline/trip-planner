@@ -5,6 +5,7 @@ import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
 import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
 import { flagged } from "@/lib/conflicts.ts";
+import { attendingItems, rsvpsForItems } from "@/lib/attendance.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { createInviteAction, shareItemAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
@@ -43,7 +44,7 @@ export default async function TripPage({
   searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string; invite?: string; tab?: string }>;
+  searchParams: Promise<{ error?: string; invite?: string; tab?: string; view?: string }>;
 }) {
   const user = await getCurrentUser();
   const { tripId } = await params;
@@ -57,11 +58,16 @@ export default async function TripPage({
     throw err;
   }
 
-  const { error, invite, tab } = await searchParams;
+  const { error, invite, tab, view } = await searchParams;
   // Plain searchParams-driven tabs, not client state -- linkable/bookmarkable
   // for free, no JS needed. An unrecognized or missing value just falls
   // back to Agreed rather than erroring.
   const activeTab: Tab = tab === "playspace" || tab === "scratchpad" ? tab : "agreed";
+  // Same reasoning for the Agreed tab's own itinerary toggle -- "mine" is
+  // the default (an item you declined or never RSVP'd to stays out of your
+  // own view), "all" shows the whole group's settled plan regardless of
+  // your own RSVP.
+  const itineraryView: "mine" | "all" = view === "all" ? "all" : "mine";
 
   const items = await listItems(access);
   // listItems is already scoped (see scope.ts's visibleToViewer) so any
@@ -74,11 +80,22 @@ export default async function TripPage({
 
   const shared = items.filter((i) => i.visibility === "group");
   const locked = shared.filter((i) => i.status === "locked" && i.startsAt);
-  const lockedByDay = groupByDay(locked);
+
+  const lockedRsvps = await rsvpsForItems(locked.map((i) => i.id));
+  const lockedRsvpMap = new Map(lockedRsvps.map((r) => [r.itemId, r.responses]));
+  // "My Itinerary" -- required items automatically, optional items only
+  // where the viewer said yes. Same rule conflictsForViewer builds its own
+  // timeline from (see attendance.ts's attendingItems), so this is exactly
+  // what a Master Planner's-eye "View All" hides: whatever you declined or
+  // never answered.
+  const myLocked = attendingItems(locked, lockedRsvpMap, access.viewer.id);
+  const visibleLocked = itineraryView === "all" ? locked : myLocked;
+
+  const lockedByDay = groupByDay(visibleLocked);
   // Same safety net as the old Ideas list had: a locked item's date can, in
   // principle, fall outside the trip's own span (placeInDay never grounded
   // it to a day), and it shouldn't just vanish because of that.
-  const lockedOffCalendar = locked.filter((i) => !i.dayId);
+  const lockedOffCalendar = visibleLocked.filter((i) => !i.dayId);
 
   // idea/proposed/locked -- everything shared and still live. Locked items
   // are deliberately included here too (flagged via their own "locked"
@@ -180,9 +197,42 @@ export default async function TripPage({
 
       {activeTab === "agreed" && (
         <div className="space-y-6">
-          <p className="text-xs text-stone-400">
-            The settled plan — locked items, day by day. Head to PlaySpace to propose something new.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-stone-400">
+              The settled plan — locked items, day by day. Head to PlaySpace to propose something new.
+            </p>
+            <div className="flex items-center gap-1 text-xs">
+              <a
+                href="?tab=agreed&view=mine"
+                aria-current={itineraryView === "mine" ? "page" : undefined}
+                className={
+                  itineraryView === "mine"
+                    ? "font-medium text-stone-900 underline"
+                    : "text-stone-500 underline hover:text-stone-700"
+                }
+              >
+                My Itinerary
+              </a>
+              <span className="text-stone-300">·</span>
+              <a
+                href="?tab=agreed&view=all"
+                aria-current={itineraryView === "all" ? "page" : undefined}
+                className={
+                  itineraryView === "all"
+                    ? "font-medium text-stone-900 underline"
+                    : "text-stone-500 underline hover:text-stone-700"
+                }
+              >
+                View All
+              </a>
+            </div>
+          </div>
+          {itineraryView === "all" && (
+            <p className="-mt-4 text-xs text-stone-400">
+              Showing everyone&apos;s locked plans, including optional items you declined or haven&apos;t
+              answered.
+            </p>
+          )}
           <AgreedDaysSection
             tripId={tripId}
             days={days}

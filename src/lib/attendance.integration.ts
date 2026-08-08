@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attendanceFor, myRsvp, rsvpsForItems } from "./attendance.ts";
+import { attendanceFor, attendingItems, myRsvp, rsvpsForItems } from "./attendance.ts";
 import { createItem, lockItem, scheduleItem, setRsvp } from "./items.ts";
 import { requireTripAccess } from "./scope.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
@@ -102,6 +102,43 @@ test("myRsvp returns the viewer's own response, or null if they haven't answered
   assert.equal(await myRsvp(plannerAccess, locked.id), null);
   await setRsvp(plannerAccess, locked.id, "maybe");
   assert.equal(await myRsvp(plannerAccess, locked.id), "maybe");
+});
+
+test("attendingItems: required items always pass; optional items only pass for a yes RSVP -- a no or no-answer both drop out", async (t) => {
+  const { trip, userIds, memberA, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const required = await lockItem(
+    plannerAccess,
+    (await scheduleItem(plannerAccess, (await createItem(plannerAccess, { title: "Required" })).id, new Date("2026-07-05T09:00:00Z"), null)).id,
+    "required",
+  );
+  const optionalYes = await lockItem(
+    plannerAccess,
+    (await scheduleItem(plannerAccess, (await createItem(plannerAccess, { title: "Optional, said yes" })).id, new Date("2026-07-05T10:00:00Z"), null)).id,
+    "optional",
+  );
+  const optionalNo = await lockItem(
+    plannerAccess,
+    (await scheduleItem(plannerAccess, (await createItem(plannerAccess, { title: "Optional, said no" })).id, new Date("2026-07-05T11:00:00Z"), null)).id,
+    "optional",
+  );
+  const optionalUnanswered = await lockItem(
+    plannerAccess,
+    (await scheduleItem(plannerAccess, (await createItem(plannerAccess, { title: "Optional, no answer" })).id, new Date("2026-07-05T12:00:00Z"), null)).id,
+    "optional",
+  );
+
+  const memberAAccess = await requireTripAccess(trip.id, memberA);
+  await setRsvp(memberAAccess, optionalYes.id, "yes");
+  await setRsvp(memberAAccess, optionalNo.id, "no");
+
+  const all = [required, optionalYes, optionalNo, optionalUnanswered];
+  const rsvps = await rsvpsForItems(all.map((i) => i.id));
+  const rsvpMap = new Map(rsvps.map((r) => [r.itemId, r.responses]));
+
+  const mine = attendingItems(all, rsvpMap, memberA.id);
+  assert.deepEqual(mine.map((i) => i.id).sort(), [required.id, optionalYes.id].sort());
 });
 
 test("rsvpsForItems: empty input short-circuits without a query; otherwise batches across multiple items", async (t) => {

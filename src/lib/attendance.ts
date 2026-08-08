@@ -65,6 +65,27 @@ export async function rsvpsForItems(
   return [...grouped].map(([itemId, responses]) => ({ itemId, responses }));
 }
 
+/**
+ * Filters group items down to the ones a member is actually attending --
+ * required items automatically (everyone's on the bus), optional items
+ * only where they RSVP'd yes. Same rule conflictsForViewer uses to build a
+ * timeline (see conflicts-for.ts): "My Itinerary" is exactly the set
+ * analyzeTimeline would check conflicts against for this person, not just
+ * an approximation of it. Doesn't handle private items -- those are
+ * already scoped to their author by scope.ts's visibleToViewer, before
+ * attendance ever enters the picture.
+ */
+export function attendingItems<T extends { id: string; commitment: Item["commitment"] }>(
+  items: T[],
+  rsvpMap: Map<string, Map<string, string>>,
+  memberId: string,
+): T[] {
+  return items.filter((item) => {
+    if (item.commitment === "required") return true;
+    return rsvpMap.get(item.id)?.get(memberId) === "yes";
+  });
+}
+
 export async function myRsvp(
   access: TripAccess,
   itemId: string,
