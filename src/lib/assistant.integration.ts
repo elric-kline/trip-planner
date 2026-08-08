@@ -7,6 +7,7 @@ import {
 } from "./assistant.ts";
 import { RuleError, createItem, lockItem, scheduleItem, setRsvp } from "./items.ts";
 import { listItems, requireTripAccess } from "./scope.ts";
+import { addLocation, listDays, setLocationMembers } from "./days.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
 
 function clearEnv() {
@@ -174,6 +175,50 @@ test("the system prompt reflects the locked plan, including who's attending an o
   assert.match(systemPrompt, /required — everyone attending/);
   assert.match(systemPrompt, new RegExp(`City tour.*attending: ${memberA.name ?? memberA.email}`));
   assert.doesNotMatch(systemPrompt, new RegExp(`attending: [^\\n]*${planner.name ?? planner.email}`));
+});
+
+test("the system prompt reflects the day-by-day wake/stop/sleep locations, including a split day's per-person legs, not just the trip's overall destination", async (t) => {
+  const { trip, userIds, memberA, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => {
+    clearEnv();
+    return cleanupTrip(trip.id, userIds);
+  });
+
+  const days = await listDays(plannerAccess); // trip spans 2026-01-01..2026-01-05, see test-fixtures.ts
+  const [day1, day2] = days;
+
+  // Day 1: everyone wakes in Seattle, then sleeps in Vancouver -- a
+  // multi-city trip whose overall destination field says only "Testville".
+  await addLocation(plannerAccess, day1.id, "wake", { name: "Seattle, WA" });
+  await addLocation(plannerAccess, day1.id, "sleep", { name: "Vancouver, BC" });
+
+  // Day 2: a split -- the planner wakes in Vancouver, memberA wakes
+  // separately in Whistler.
+  const vancouverWake = await addLocation(plannerAccess, day2.id, "wake", { name: "Vancouver, BC" });
+  await setLocationMembers(plannerAccess, vancouverWake.id, [plannerAccess.viewer.id]);
+  const whistlerWake = await addLocation(plannerAccess, day2.id, "wake", { name: "Whistler, BC" });
+  await setLocationMembers(plannerAccess, whistlerWake.id, [memberA.id]);
+
+  process.env.ANTHROPIC_API_KEY = "test_key";
+  let systemPrompt = "";
+  t.mock.method(globalThis, "fetch", async (_url: unknown, init: unknown) => {
+    const body = JSON.parse((init as RequestInit).body as string);
+    systemPrompt = body.system;
+    return textResponse("ok");
+  });
+
+  await sendAssistantMessage(plannerAccess, "what time's sunset our first day?");
+
+  assert.match(systemPrompt, /DAY-BY-DAY LOCATIONS/);
+  assert.match(systemPrompt, /Thu, Jan 1: wakes in Seattle, WA; sleeps in Vancouver, BC/);
+  assert.match(systemPrompt, /Fri, Jan 2: wakes in Vancouver, BC \([^)]*\) \/ Whistler, BC \([^)]*\)/);
+  // Days with nothing entered (Jan 3-5) shouldn't show up as noise.
+  assert.doesNotMatch(systemPrompt, /Jan 3/);
+
+  // Same context from the other member's own thread, resolved to *their* name in the split.
+  systemPrompt = "";
+  await sendAssistantMessage(memberAAccess, "where do I wake up on day 2?");
+  assert.match(systemPrompt, new RegExp(`Whistler, BC \\(${memberA.name ?? memberA.email}\\)`));
 });
 
 test("a pin_idea tool call creates a private Scratchpad idea and is reported back in the pinned list", async (t) => {
