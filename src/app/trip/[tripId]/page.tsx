@@ -7,11 +7,13 @@ import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
 import { flagged } from "@/lib/conflicts.ts";
 import { attendingItems, rsvpsForItems } from "@/lib/attendance.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
+import { getAssistantHistory } from "@/lib/assistant.ts";
 import { createInviteAction, shareItemAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
 import AgreedDaysSection from "./AgreedDaysSection.tsx";
 import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
+import AssistantChat from "./AssistantChat.tsx";
 import { ItemList, ItemRow } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
@@ -68,6 +70,9 @@ export default async function TripPage({
   // own view), "all" shows the whole group's settled plan regardless of
   // your own RSVP.
   const itineraryView: "mine" | "all" = view === "all" ? "all" : "mine";
+  // Only fetched for the tab that actually shows it -- no point querying the
+  // assistant's own conversation log on every other tab's render.
+  const assistantHistory = activeTab === "scratchpad" ? await getAssistantHistory(access) : [];
 
   const items = await listItems(access);
   // listItems is already scoped (see scope.ts's visibleToViewer) so any
@@ -295,6 +300,10 @@ export default async function TripPage({
       {activeTab === "scratchpad" && (
         <div className="space-y-6">
           <p className="text-xs text-stone-400">Yours alone until you share it — nobody else on the trip can see these.</p>
+
+          <Section title="Trip assistant">
+            <AssistantChat tripId={tripId} history={assistantHistory} />
+          </Section>
 
           <Section title="My ideas">
             {scratchpad.length === 0 ? (

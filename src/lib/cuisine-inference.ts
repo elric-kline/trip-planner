@@ -1,4 +1,5 @@
 import { DIETARY_TAGS, type DietaryTag } from "./dietary.ts";
+import { callMessagesApi, textOf } from "./anthropic.ts";
 
 /**
  * Infers a restaurant's cuisine and likely dietary accommodations by having
@@ -7,24 +8,21 @@ import { DIETARY_TAGS, type DietaryTag } from "./dietary.ts";
  * Places' own fields are too coarse to trust silently).
  *
  * Plain `fetch` against the Messages API rather than the `@anthropic-ai/sdk`
- * package, same reasoning as email.ts's Resend integration: one call, no
- * extra dependency to track, and it keeps this testable the same way as
- * every other lib module here (mock global fetch, no SDK internals to
- * fight). Two Claude calls, not one: a web-search-enabled research call in
- * plain text, then a separate structured-output call to extract clean JSON
- * from that research. Keeping them apart sidesteps any interaction between
- * the web search tool's automatic citations and output_config.format's own
- * citations restriction, and lets the research call reason freely instead
- * of fighting a schema mid-search.
+ * package -- see anthropic.ts, whose callMessagesApi/textOf this shares
+ * with lib/assistant-agent.ts. Two Claude calls, not one: a web-search-
+ * enabled research call in plain text, then a separate structured-output
+ * call to extract clean JSON from that research. Keeping them apart
+ * sidesteps any interaction between the web search tool's automatic
+ * citations and output_config.format's own citations restriction, and lets
+ * the research call reason freely instead of fighting a schema mid-search.
  *
  * Same failure shape as geocode.ts/places.ts: no key, a bad response, a
  * refusal, or a network error all just return null. This is a "nice to
  * have" suggestion a human still has to confirm (see the UI's "AI-suggested
  * — please verify" framing) -- it should never block saving a dining item.
  */
-const MESSAGES_API_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
 const MODEL = "claude-opus-5";
+const LOG_PREFIX = "[cuisine-inference]";
 
 export type CuisineInference = {
   cuisine: string | null;
@@ -33,51 +31,6 @@ export type CuisineInference = {
   /** The model's own plain-language summary of what it found (or didn't) -- shown to the user alongside the suggestion, not a calibrated confidence score. */
   summary: string | null;
 };
-
-type AnthropicContentBlock = { type: string; text?: string };
-type AnthropicMessageResponse = {
-  content?: AnthropicContentBlock[];
-  stop_reason?: string;
-};
-
-async function callMessagesApi(
-  apiKey: string,
-  body: Record<string, unknown>,
-  timeoutMs: number,
-): Promise<AnthropicMessageResponse | null> {
-  let response: Response;
-  try {
-    response = await fetch(MESSAGES_API_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (err) {
-    console.warn("[cuisine-inference] request failed:", err);
-    return null;
-  }
-
-  if (!response.ok) {
-    const errBody = await response.text().catch(() => "");
-    console.warn(`[cuisine-inference] Anthropic API returned HTTP ${response.status}: ${errBody}`);
-    return null;
-  }
-
-  return (await response.json()) as AnthropicMessageResponse;
-}
-
-function textOf(response: AnthropicMessageResponse): string {
-  return (response.content ?? [])
-    .filter((b) => b.type === "text" && b.text)
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
-}
 
 /** Web search runs as a server-side tool loop; a long search can pause after many rounds. Resume once, then give up rather than loop indefinitely. */
 async function researchRestaurant(apiKey: string, query: string): Promise<string | null> {
@@ -94,19 +47,19 @@ async function researchRestaurant(apiKey: string, query: string): Promise<string
     tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
   };
 
-  let response = await callMessagesApi(apiKey, { ...baseBody, messages }, 30000);
+  let response = await callMessagesApi(apiKey, { ...baseBody, messages }, 30000, LOG_PREFIX);
   if (!response) return null;
 
   // Resume a paused server-tool loop at most once -- the API detects the
   // trailing server_tool_use block on its own; no extra "continue" message.
   for (let i = 0; i < 2 && response.stop_reason === "pause_turn"; i++) {
     messages.push({ role: "assistant", content: response.content });
-    response = await callMessagesApi(apiKey, { ...baseBody, messages }, 30000);
+    response = await callMessagesApi(apiKey, { ...baseBody, messages }, 30000, LOG_PREFIX);
     if (!response) return null;
   }
 
   if (response.stop_reason === "refusal") {
-    console.warn("[cuisine-inference] research call was refused.");
+    console.warn(`${LOG_PREFIX} research call was refused.`);
     return null;
   }
 
@@ -140,6 +93,7 @@ async function extractStructured(apiKey: string, research: string): Promise<Cuis
       ],
     },
     15000,
+    LOG_PREFIX,
   );
   if (!response || response.stop_reason === "refusal") return null;
 
@@ -150,7 +104,7 @@ async function extractStructured(apiKey: string, research: string): Promise<Cuis
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    console.warn("[cuisine-inference] extraction response wasn't valid JSON:", err);
+    console.warn(`${LOG_PREFIX} extraction response wasn't valid JSON:`, err);
     return null;
   }
 
@@ -181,7 +135,7 @@ export async function inferCuisineAndDietary(
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.warn(`[cuisine-inference] ANTHROPIC_API_KEY not set — skipping lookup for "${query}".`);
+    console.warn(`${LOG_PREFIX} ANTHROPIC_API_KEY not set — skipping lookup for "${query}".`);
     return null;
   }
 
