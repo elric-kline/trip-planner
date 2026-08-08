@@ -19,6 +19,10 @@ export type TransportDetailsInput = {
   bookingUrl?: string | null;
   costAmount?: number | null;
   costCurrency?: string | null;
+  destinationName?: string | null;
+  /** Geocoded from destinationName by the caller (see actions.ts) -- what lets a drive/rideshare/train's actual endpoint, not the item's own generic location (its departure point), govern travel-time conflict checks against whatever comes next. Only meaningful for non-flight subtypes; a flight's destination comes from its last leg instead. */
+  destinationLat?: number | null;
+  destinationLng?: number | null;
 };
 
 export type TransportLegInput = {

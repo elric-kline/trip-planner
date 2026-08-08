@@ -77,6 +77,11 @@ async function transportWindows(
           lastLeg.arrivalLat != null && lastLeg.arrivalLng != null
             ? { lat: lastLeg.arrivalLat, lng: lastLeg.arrivalLng }
             : null;
+      } else if (details.destinationLat != null && details.destinationLng != null) {
+        // Non-flight subtypes have no legs -- transportDetails.destinationLat/Lng
+        // (a drive/rideshare/train's own endpoint, distinct from the item's
+        // own `location` -- its departure point) is the only source.
+        destinationLocation = { lat: details.destinationLat, lng: details.destinationLng };
       }
 
       const buffer = transportBufferFor(details.subtype, details.international);

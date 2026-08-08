@@ -368,6 +368,20 @@ export default async function ItemPage({
                   </label>
                 )}
               </div>
+              {(transport?.subtype ?? "other") !== "flight" && (
+                <>
+                  <AddressAutocomplete
+                    name="destinationName"
+                    defaultValue={transport?.destinationName}
+                    placeholder="Destination (optional)"
+                    className="input"
+                  />
+                  <p className="-mt-2 text-xs text-stone-400">
+                    Where this trip ends up, if different from Location — lets the conflict checker estimate
+                    travel from here, not from where it started.
+                  </p>
+                </>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <input
                   name="confirmationNumber"
@@ -417,6 +431,9 @@ export default async function ItemPage({
                   {TRANSPORT_SUBTYPE_LABEL[transport.subtype]}
                   {transport.subtype === "flight" && transport.international ? " (international)" : ""}
                 </Field>
+                {transport.subtype !== "flight" && transport.destinationName && (
+                  <Field label="Destination">{transport.destinationName}</Field>
+                )}
                 {transport.confirmationNumber && (
                   <Field label="Confirmation #">{transport.confirmationNumber}</Field>
                 )}

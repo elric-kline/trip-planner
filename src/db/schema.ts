@@ -474,6 +474,15 @@ export const diningDetails = pgTable("dining_details", {
  * both the pre-departure buffer (extra check-in/security/customs time) and
  * the minimum layover a connection gets flagged for. Null/false is the
  * domestic default.
+ *
+ * destinationName/Lat/Lng are the non-flight counterpart to transportLegs'
+ * per-leg arrivalLat/Lng: where this item actually ends up, as opposed to
+ * the item's own locationName/Lat/Lng (its departure point). Meaningful
+ * for any subtype except "flight" (which gets a more precise, live-status-
+ * aware destination from its last leg instead -- see conflicts-for.ts).
+ * Null just means "not known," same as a missing location anywhere else in
+ * this app -- conflicts.ts treats that as unanalyzable, never as "assume
+ * it's still at its departure point."
  */
 export const transportDetails = pgTable("transport_details", {
   itemId: uuid("item_id")
@@ -488,6 +497,9 @@ export const transportDetails = pgTable("transport_details", {
   costAmount: doublePrecision("cost_amount"),
   /** ISO 4217, e.g. "USD" — free text, not validated against a currency list. */
   costCurrency: text("cost_currency"),
+  destinationName: text("destination_name"),
+  destinationLat: doublePrecision("destination_lat"),
+  destinationLng: doublePrecision("destination_lng"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

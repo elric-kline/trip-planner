@@ -60,6 +60,8 @@ export default function DayItemBuilder({
                       visibility="group"
                       dayId={dayId}
                       afterItemId={item.id}
+                      precedingLocationName={item.locationName}
+                      followingLocationName={items[i + 1].locationName}
                       onCancel={close}
                     />
                   )}
