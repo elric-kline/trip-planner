@@ -163,6 +163,107 @@ test("conflictsForViewer resolves a flight's window from live status when a prov
   assert.equal(findings[0].reason, "overlap");
 });
 
+// Newark (departure) and Seattle (landing + lodging) -- real coordinates,
+// picked specifically so a Haversine estimate between them is huge (the
+// exact false-conflict shape this fix eliminates: a flight's own
+// departure point standing in for where it actually lands).
+const EWR = { lat: 40.6895, lng: -74.1745 };
+const SEATTLE_AIRPORT = { lat: 47.4502, lng: -122.3088 };
+const SEATTLE_LODGING = { lat: 47.6205, lng: -122.3493 }; // a few miles from the airport, inside the city
+
+test("conflictsForViewer uses a flight's actual landing point for the next item, not its departure -- landing and checking in both in Seattle isn't a cross-country drive", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const flight = await createItem(plannerAccess, {
+    title: "Newark Flight",
+    category: "transport",
+    locationLat: EWR.lat,
+    locationLng: EWR.lng,
+  });
+  await upsertTransportDetails(plannerAccess, flight.id, { subtype: "flight" });
+  await setTransportLegs(plannerAccess, flight.id, [
+    {
+      flightNumber: "UA100",
+      departureAirport: "EWR",
+      arrivalAirport: "SEA",
+      arrivalLat: SEATTLE_AIRPORT.lat,
+      arrivalLng: SEATTLE_AIRPORT.lng,
+      departsAt: new Date("2026-09-11T08:00:00Z"),
+      arrivesAt: new Date("2026-09-11T12:00:00Z"),
+    },
+  ]);
+  await lockItem(plannerAccess, (await getItem(plannerAccess, flight.id)).id, "required");
+
+  await lockItem(
+    plannerAccess,
+    (
+      await scheduleItem(
+        plannerAccess,
+        (
+          await createItem(plannerAccess, {
+            title: "Modern Queen Anne Retreat with Rooftop",
+            locationLat: SEATTLE_LODGING.lat,
+            locationLng: SEATTLE_LODGING.lng,
+          })
+        ).id,
+        new Date("2026-09-11T16:00:00Z"), // 4pm check-in, same as reported
+        null,
+      )
+    ).id,
+    "required",
+  );
+
+  const findings = flagged(await conflictsForViewer(plannerAccess));
+  assert.deepEqual(findings, [], "landing and checking in both in Seattle should never read as a cross-country drive");
+});
+
+test("conflictsForViewer treats a flight with no resolvable landing point as unanalyzable, not as still being at its departure point", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const flight = await createItem(plannerAccess, {
+    title: "Newark Flight",
+    category: "transport",
+    locationLat: EWR.lat,
+    locationLng: EWR.lng,
+  });
+  await upsertTransportDetails(plannerAccess, flight.id, { subtype: "flight" });
+  await setTransportLegs(plannerAccess, flight.id, [
+    // No arrivalLat/arrivalLng -- e.g. the airport code never geocoded.
+    {
+      flightNumber: "UA100",
+      departsAt: new Date("2026-09-11T08:00:00Z"),
+      arrivesAt: new Date("2026-09-11T12:00:00Z"),
+    },
+  ]);
+  await lockItem(plannerAccess, (await getItem(plannerAccess, flight.id)).id, "required");
+
+  await lockItem(
+    plannerAccess,
+    (
+      await scheduleItem(
+        plannerAccess,
+        (
+          await createItem(plannerAccess, {
+            title: "Modern Queen Anne Retreat with Rooftop",
+            locationLat: SEATTLE_LODGING.lat,
+            locationLng: SEATTLE_LODGING.lng,
+          })
+        ).id,
+        new Date("2026-09-11T16:00:00Z"),
+        null,
+      )
+    ).id,
+    "required",
+  );
+
+  const findings = await conflictsForViewer(plannerAccess);
+  const flightToLodging = findings.find((f) => f.before.id === flight.id);
+  assert.equal(flightToLodging?.reason, "no-location");
+  assert.equal(flightToLodging?.severity, "ok");
+});
+
 test("groupTimelineFor: required items always included; optional items only when the member RSVP'd yes", async (t) => {
   const { trip, userIds, plannerAccess, memberA } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));

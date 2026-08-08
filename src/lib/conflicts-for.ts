@@ -1,4 +1,4 @@
-import type { TravelTimeProvider } from "./travel.ts";
+import type { Coordinates, TravelTimeProvider } from "./travel.ts";
 import { HaversineTravelTimeProvider } from "./travel.ts";
 import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
 import { rsvpsForItems } from "./attendance.ts";
@@ -7,8 +7,16 @@ import { getTransportDetailsForItems, getTransportLegsForItems, type TransportLe
 import { transportBufferFor, widenForBuffer } from "./transport-buffer.ts";
 import { effectiveLegTimes, NoopFlightStatusProvider, type FlightStatusProvider } from "./flight-status.ts";
 
-/** A transport item's buffer-widened, live-status-aware window -- what toScheduleItem uses in place of the item's raw startsAt/endsAt when one is available. */
-type TransportWindow = { startsAt: Date; endsAt: Date };
+/**
+ * A transport item's buffer-widened, live-status-aware window -- what
+ * toScheduleItem uses in place of the item's raw startsAt/endsAt when one
+ * is available. destinationLocation is where a flight actually lands (the
+ * last leg's geocoded arrival, if resolved) -- null for any other subtype,
+ * or a flight with no resolvable arrival, deliberately not falling back to
+ * the item's own `location` (its departure point); see conflicts.ts's
+ * ScheduleItem.destinationLocation for why that fallback would be wrong.
+ */
+type TransportWindow = { startsAt: Date; endsAt: Date; destinationLocation: Coordinates | null };
 
 function utcCalendarDate(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -52,6 +60,7 @@ async function transportWindows(
       if (!details) return; // no details saved yet -- nothing to widen, item.startsAt/endsAt stands as-is
 
       let scheduled = { departsAt: item.startsAt!, arrivesAt: item.endsAt! };
+      let destinationLocation: Coordinates | null = null;
       const legs = legsMap.get(item.id);
       if (details.subtype === "flight" && legs && legs.length > 0) {
         const firstLeg = legs[0];
@@ -64,13 +73,17 @@ async function transportWindows(
           departsAt: effectiveLegTimes(firstLeg, firstStatus).departsAt,
           arrivesAt: effectiveLegTimes(lastLeg, lastStatus).arrivesAt,
         };
+        destinationLocation =
+          lastLeg.arrivalLat != null && lastLeg.arrivalLng != null
+            ? { lat: lastLeg.arrivalLat, lng: lastLeg.arrivalLng }
+            : null;
       }
 
       const buffer = transportBufferFor(details.subtype, details.international);
-      windows.set(
-        item.id,
-        widenForBuffer({ startsAt: scheduled.departsAt, endsAt: scheduled.arrivesAt }, buffer),
-      );
+      windows.set(item.id, {
+        ...widenForBuffer({ startsAt: scheduled.departsAt, endsAt: scheduled.arrivesAt }, buffer),
+        destinationLocation,
+      });
     }),
   );
   return windows;
@@ -78,6 +91,10 @@ async function transportWindows(
 
 function toScheduleItem(item: Item, windows: Map<string, TransportWindow>): ScheduleItem {
   const window = windows.get(item.id);
+  const location =
+    item.locationLat != null && item.locationLng != null
+      ? { lat: item.locationLat, lng: item.locationLng }
+      : null;
   return {
     id: item.id,
     title: item.title,
@@ -86,10 +103,14 @@ function toScheduleItem(item: Item, windows: Map<string, TransportWindow>): Sche
       window?.endsAt ??
       item.endsAt ??
       new Date(item.startsAt!.getTime() + DEFAULT_DURATION_MINUTES * 60_000),
-    location:
-      item.locationLat != null && item.locationLng != null
-        ? { lat: item.locationLat, lng: item.locationLng }
-        : null,
+    location,
+    // A transport item (window present) never falls back to its own
+    // `location` here -- that's the departure point, and reusing it for
+    // where this item *ends up* is exactly the cross-country false
+    // conflict this type exists to prevent. Anything else (window absent:
+    // not a transport item, or a transport item with no details saved
+    // yet) is stationary, same as before transport destinations existed.
+    destinationLocation: window ? window.destinationLocation : location,
   };
 }
 

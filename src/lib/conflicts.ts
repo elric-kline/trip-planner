@@ -8,7 +8,20 @@ export type ScheduleItem = {
   title: string;
   startsAt: Date;
   endsAt: Date;
+  /** Where the traveler is for this item's *start* -- what an item before this one needs to reach. */
   location: Coordinates | null;
+  /**
+   * Where the traveler ends up once this item is *done* -- what governs
+   * travel to whatever comes next. For a stationary item (dining, lodging,
+   * an activity) that's the same point as `location`, since you're there
+   * the whole time. A directional item (a flight, in particular) sets this
+   * independently: where you land has nothing to do with where you took
+   * off, and reusing `location` for both would silently estimate a ground
+   * route between the two -- see conflicts-for.ts's toScheduleItem, which
+   * leaves this null rather than guessing when the actual destination
+   * isn't known, so the gap reads as unanalyzable instead of wrong.
+   */
+  destinationLocation: Coordinates | null;
 };
 
 export type ScheduleFinding = {
@@ -74,9 +87,12 @@ export async function analyzeTimeline(
       continue;
     }
 
-    if (!before.location || !after.location) {
+    if (!before.destinationLocation || !after.location) {
       // Nothing to say about travel without both locations — not flagged as
-      // an issue, just not analyzable.
+      // an issue, just not analyzable. Deliberately before.destinationLocation,
+      // not before.location: for a directional item those can differ, and
+      // "we don't know where this one ends up" must stay unanalyzable rather
+      // than silently falling back to where it started.
       findings.push({
         severity: "ok",
         before,
@@ -91,8 +107,8 @@ export async function analyzeTimeline(
       continue;
     }
 
-    const mode = inferMode(before.location, after.location);
-    const est = await travelProvider.estimate(before.location, after.location, mode);
+    const mode = inferMode(before.destinationLocation, after.location);
+    const est = await travelProvider.estimate(before.destinationLocation, after.location, mode);
     const slackMinutes = gapMinutes - est.minutes - est.overheadMinutes;
 
     findings.push({
