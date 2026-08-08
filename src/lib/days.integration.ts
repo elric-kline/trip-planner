@@ -15,6 +15,7 @@ import {
   locationsForDays,
   moveLocation,
   removeLocation,
+  renameLocation,
   setLocationMembers,
   unresolvedBranchesForMember,
 } from "./days.ts";
@@ -179,6 +180,54 @@ test("addLocation rejects a day id from a different trip, and an unknown day id"
 
   await assert.rejects(() => addLocation(accessA, dayOfTripB.id, "wake", { name: "Wrong trip" }), RuleError);
   await assert.rejects(() => addLocation(accessA, randomUUID(), "wake", { name: "Made up day" }), RuleError);
+});
+
+test("renameLocation edits an existing location's name/coordinates in place, without touching who's included", async (t) => {
+  const { trip, owner, participant, ownerAccess, day } = await setupTripWithDay({
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+  });
+  t.after(() => cleanupTrip(trip.id, [owner.id, participant.id]));
+
+  // Splitting a combined "PA/NYC" entry down to just "PA," so "NYC" can
+  // become its own location alongside it.
+  const combined = await addLocation(ownerAccess, day.id, "wake", { name: "PA/NYC" });
+  await setLocationMembers(ownerAccess, combined.id, [owner.id]);
+
+  const renamed = await renameLocation(ownerAccess, combined.id, { name: "PA", lat: 40.65, lng: -75.38 });
+  assert.equal(renamed.id, combined.id, "same row, edited in place");
+  assert.equal(renamed.name, "PA");
+  assert.equal(renamed.lat, 40.65);
+
+  const members = await locationMembersForLocations([combined.id]);
+  assert.deepEqual(members.get(combined.id), [owner.id], "membership untouched by the rename");
+
+  const nyc = await addLocation(ownerAccess, day.id, "wake", { name: "NYC" });
+  const locations = (await locationsForDays([day.id])).get(day.id) ?? [];
+  assert.deepEqual(
+    new Set(locations.filter((l) => l.kind === "wake").map((l) => l.name)),
+    new Set(["PA", "NYC"]),
+    "now two genuinely separate locations",
+  );
+  void nyc;
+});
+
+test("renameLocation rejects a blank name, and a location belonging to another trip", async (t) => {
+  const owner = await createTestUser();
+  const tripA = await createTestTrip(owner, { startDate: "2026-09-01", endDate: "2026-09-01" });
+  const tripB = await createTestTrip(owner, { startDate: "2026-10-01", endDate: "2026-10-01" });
+  t.after(() => cleanupTrip(tripA.id, []).then(() => cleanupTrip(tripB.id, [owner.id])));
+
+  const accessA = await requireTripAccess(tripA.id, owner);
+  const accessB = await requireTripAccess(tripB.id, owner);
+  const [dayA] = await listDays(accessA);
+  const [dayB] = await listDays(accessB);
+
+  const locationOnA = await addLocation(accessA, dayA.id, "wake", { name: "Original" });
+  await assert.rejects(() => renameLocation(accessA, locationOnA.id, { name: "   " }), RuleError);
+
+  const locationOnB = await addLocation(accessB, dayB.id, "wake", { name: "Belongs to trip B" });
+  await assert.rejects(() => renameLocation(accessA, locationOnB.id, { name: "Hijacked" }), RuleError);
 });
 
 test("locationsForDays([]) returns an empty map without querying", async () => {

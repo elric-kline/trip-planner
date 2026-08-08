@@ -40,6 +40,7 @@ export default function AddItemForm({
   tripId,
   destination,
   members,
+  visibility,
   dayId,
   afterItemId,
   onCancel,
@@ -47,11 +48,20 @@ export default function AddItemForm({
   tripId: string;
   destination: string;
   members: TripMemberSummary[];
-  /** Set when opened from a day's own "+ Add" slot (see DayItemBuilder.tsx) -- omitted for the trip-wide "Add something" form, which creates an ungrounded idea same as always. */
+  /**
+   * Which tab this add lands in -- required, not a checkbox, because which
+   * tab you opened the form from already answers the question: PlaySpace's
+   * "add an idea to share" (and a day's own "+ Add," which only ever shows
+   * up inside PlaySpace's timeline) is always "group"; Scratchpad's "add a
+   * private idea" is always "private." A visibility choice embedded in one
+   * shared form stopped making sense once each tab implies its own answer.
+   */
+  visibility: "private" | "group";
+  /** Set when opened from a day's own "+ Add" slot (see DayItemBuilder.tsx) -- omitted for a tab-level add, which creates a dayless item. */
   dayId?: string;
   /** Where in that day's draft order to insert -- omitted appends to the end. Ignored once the item gets a startsAt, which always governs order instead. */
   afterItemId?: string;
-  /** Shown next to Add only for the compact, day-scoped form -- the standalone bottom-of-page form has nothing to collapse back into. */
+  /** Shown next to Add only for the compact, day-scoped form -- a tab-level form has nothing to collapse back into. */
   onCancel?: () => void;
 }) {
   const [category, setCategory] = useState<Category>("activity");
@@ -96,6 +106,7 @@ export default function AddItemForm({
     <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
       {dayId && <input type="hidden" name="dayId" value={dayId} />}
       {afterItemId && <input type="hidden" name="afterItemId" value={afterItemId} />}
+      {visibility === "private" && <input type="hidden" name="private" value="on" />}
       <div className="grid grid-cols-2 gap-3">
         <input
           key={`title-${diningPrefill?.version ?? 0}`}
@@ -281,9 +292,6 @@ export default function AddItemForm({
           <input type="datetime-local" name="endsAt" className="input" />
         </label>
       </div>
-      <label className="flex items-center gap-2 text-sm text-stone-600">
-        <input type="checkbox" name="private" /> Keep this private to me
-      </label>
       <div className="flex items-center gap-3">
         <button type="submit" className="btn-primary justify-self-start">
           Add

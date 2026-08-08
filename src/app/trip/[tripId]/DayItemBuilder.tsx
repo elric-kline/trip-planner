@@ -6,14 +6,18 @@ import AddItemForm from "./AddItemForm.tsx";
 import { ItemRow } from "./itemDisplay.tsx";
 
 /**
- * A day's own draft: its items in order, an always-visible "+ Add" below
- * the last one (or the only one, on an empty day), and a hover-reveal
- * "+ Add" in the gap between any two items -- same trigger, different
- * discoverability, since inserting mid-list is the less common move.
- * Clicking either expands the full AddItemForm right at that slot, bound
- * to this day and (for a between-items insert) the item it goes after; a
- * time given there still wins over that manual slot once it's set (see
- * items.ts's placeInDay).
+ * A day's own draft, as seen from PlaySpace: its group-visible items in
+ * order, an always-visible "+ Add" below the last one (or the only one, on
+ * an empty day), and a hover-reveal "+ Add" in the gap between any two
+ * items -- same trigger, different discoverability, since inserting
+ * mid-list is the less common move. Clicking either expands the full
+ * AddItemForm right at that slot, bound to this day and (for a
+ * between-items insert) the item it goes after; a time given there still
+ * wins over that manual slot once it's set (see items.ts's placeInDay).
+ * Every add here is visibility="group" -- PlaySpace is the shared
+ * workspace, so there's no private option to offer (that's Scratchpad's
+ * job). Agreed's day cards don't use this at all: they're a read-only
+ * record of what's locked, not a place to propose new things.
  *
  * `openAt` is either the id of the item a gap sits right after, or the
  * sentinel "end" for the always-visible slot below the last item (or the
@@ -53,6 +57,7 @@ export default function DayItemBuilder({
                       tripId={tripId}
                       destination={destination}
                       members={members}
+                      visibility="group"
                       dayId={dayId}
                       afterItemId={item.id}
                       onCancel={close}
@@ -67,7 +72,14 @@ export default function DayItemBuilder({
 
       <div className="mt-2">
         {openAt === "end" ? (
-          <AddItemForm tripId={tripId} destination={destination} members={members} dayId={dayId} onCancel={close} />
+          <AddItemForm
+            tripId={tripId}
+            destination={destination}
+            members={members}
+            visibility="group"
+            dayId={dayId}
+            onCancel={close}
+          />
         ) : (
           <button
             type="button"

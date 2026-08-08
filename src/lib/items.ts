@@ -7,6 +7,7 @@ import {
   checkPropose,
   checkRestore,
   checkRsvp,
+  checkShare,
   checkUnlock,
   checkUnschedule,
   statusForTime,
@@ -345,6 +346,20 @@ export async function unlockItem(access: TripAccess, itemId: string): Promise<It
       lockedBy: null,
       ...touch,
     })
+    .where(eq(items.id, itemId))
+    .returning();
+
+  return updated;
+}
+
+/** Moves a Scratchpad item into PlaySpace -- see lifecycle.ts's checkShare for why this is author-only and blocked while locked. */
+export async function shareItem(access: TripAccess, itemId: string): Promise<Item> {
+  const item = await getItem(access, itemId);
+  enforce(checkShare(item, actorFor(access, item)));
+
+  const [updated] = await db
+    .update(items)
+    .set({ visibility: "group", ...touch })
     .where(eq(items.id, itemId))
     .returning();
 

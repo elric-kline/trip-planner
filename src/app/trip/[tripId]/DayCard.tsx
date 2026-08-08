@@ -5,15 +5,15 @@ import { formatCalendarDate } from "@/lib/time.ts";
 import type { DayLocationKind, TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
-import DayItemBuilder from "./DayItemBuilder.tsx";
-import { addLocationAction, moveLocationAction, removeLocationAction, setLocationMembersAction } from "./actions.ts";
+import { ItemList } from "./itemDisplay.tsx";
+import { addLocationAction, moveLocationAction, removeLocationAction, updateLocationAction } from "./actions.ts";
 
-/** A short one-line preview of what's in the day, shown whether or not it's open. */
+/** A short one-line preview of what's locked for the day, shown whether or not it's open. Agreed only ever receives locked items -- see page.tsx. */
 function itemsSummary(items: Item[]): string {
-  if (items.length === 0) return "No items yet";
+  if (items.length === 0) return "Nothing locked yet";
   const shown = items.slice(0, 3).map((i) => i.title);
   const more = items.length - shown.length;
-  return `${items.length} item${items.length === 1 ? "" : "s"}: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
+  return `${items.length} locked: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`;
 }
 
 /**
@@ -35,63 +35,68 @@ function IncludesCheckboxes({ members }: { members: TripMemberSummary[] }) {
 }
 
 /**
- * One existing location's row in the editor: name, reorder/remove among
- * its own kind, and its own "Includes" checkboxes (reflecting who's
- * actually in it right now, not the all-checked default the add-form
- * uses -- this location already exists, so its real membership is known).
+ * One existing location's row in the editor. No numbering -- position in
+ * the list already shows order, and wake/sleep locations aren't sequential
+ * at all (they're parallel branches, not steps), so a "1., 2." prefix
+ * never meant much beyond stops, and wasn't worth a special case.
+ *
+ * Reorder/remove are their own tiny one-button forms (plain HTML forbids
+ * nesting a `<form>` inside another), but the name and Includes checkboxes
+ * are deliberately ONE form with ONE "Save" -- editing a location's name
+ * (e.g. splitting a combined "PA/NYC" entry down to just "PA" so "NYC" can
+ * become its own location) and adjusting who's in it are both "this
+ * location, as I want it now," not two separate edits.
  */
 function LocationRow({
   tripId,
   location,
-  index,
   members,
   includedIds,
 }: {
   tripId: string;
   location: TripDayLocation;
-  index: number;
   members: TripMemberSummary[];
   includedIds: string[];
 }) {
   return (
     <li className="rounded border border-stone-200 bg-white p-2">
-      <div className="flex items-center justify-between gap-2 text-sm text-stone-700">
-        <span>
-          {index + 1}. {location.name}
-        </span>
-        <div className="flex shrink-0 items-center gap-1 text-xs">
-          <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
-            <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
-              ↑
-            </button>
-          </form>
-          <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
-            <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
-              ↓
-            </button>
-          </form>
-          <form action={removeLocationAction.bind(null, tripId, location.id)}>
-            <button type="submit" className="px-1 text-red-500 underline">
-              Remove
-            </button>
-          </form>
-        </div>
+      <div className="flex items-center justify-end gap-1 text-xs">
+        <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
+          <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
+            ↑
+          </button>
+        </form>
+        <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
+          <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
+            ↓
+          </button>
+        </form>
+        <form action={removeLocationAction.bind(null, tripId, location.id)}>
+          <button type="submit" className="px-1 text-red-500 underline">
+            Remove
+          </button>
+        </form>
       </div>
-      <form
-        action={setLocationMembersAction.bind(null, tripId, location.id)}
-        className="mt-2 flex flex-wrap items-center gap-2"
-      >
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {members.map((m) => (
-            <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
-              <input type="checkbox" name="includes" value={m.userId} defaultChecked={includedIds.includes(m.userId)} />
-              {m.name ?? m.email}
-            </label>
-          ))}
+      <form action={updateLocationAction.bind(null, tripId, location.id)} className="mt-1 space-y-2">
+        <AddressAutocomplete name="name" defaultValue={location.name} className="input" restrict="place" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {members.map((m) => (
+              <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
+                <input
+                  type="checkbox"
+                  name="includes"
+                  value={m.userId}
+                  defaultChecked={includedIds.includes(m.userId)}
+                />
+                {m.name ?? m.email}
+              </label>
+            ))}
+          </div>
+          <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
+            Save
+          </button>
         </div>
-        <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
-          Save includes
-        </button>
       </form>
     </li>
   );
@@ -129,12 +134,11 @@ function LocationKindSection({
       <p className="mb-2 text-xs font-medium text-stone-500">{label}</p>
       {locations.length > 0 && (
         <ul className="mb-3 space-y-2">
-          {locations.map((location, i) => (
+          {locations.map((location) => (
             <LocationRow
               key={location.id}
               tripId={tripId}
               location={location}
-              index={i}
               members={members}
               includedIds={locationMembers.get(location.id) ?? []}
             />
@@ -153,15 +157,22 @@ function LocationKindSection({
 }
 
 /**
- * A day's own header (date, item preview, and its wake/sleep/stops
- * definition) is always visible; the two things it can expand -- the item
- * workspace and the day-properties editor -- are independent toggles, not
- * nested `<details>`, because a pencil living inside a native `<summary>`
- * would also toggle the whole card open on every click. Plain client state
- * instead: clicking the header opens/closes the item builder (the "clean
- * working space" for activities/dining/lodging -- things the day *has*),
- * clicking the pencil opens/closes the wake/sleep/stops editor (properties
- * *of* the day itself).
+ * A day's card in the **Agreed** tab -- the settled record of what's
+ * actually locked in, laid out the same day-by-day way it's always been.
+ * (PlaySpace has its own, leaner day card -- PlaySpaceDayCard.tsx -- for
+ * proposing and comparing things that aren't locked yet; this one is
+ * read-only on purpose.)
+ *
+ * A day's own header (date, locked-item preview, and its wake/sleep/stops
+ * definition) is always visible; the two things it can expand -- the
+ * locked-item list and the day-properties editor -- are independent
+ * toggles, not nested `<details>`, because a pencil living inside a native
+ * `<summary>` would also toggle the whole card open on every click. Plain
+ * client state instead: clicking the header opens/closes the locked-item
+ * list, clicking the pencil opens/closes the wake/sleep/stops editor
+ * (properties *of* the day itself, still editable here even though items
+ * aren't -- once locked in, it's the definition of the agreed plan, not a
+ * proposal).
  *
  * The always-visible summary line is filtered to locations that include
  * the *viewer* -- "my personal view shows me where I'm going to be," not
@@ -177,7 +188,6 @@ export default function DayCard({
   locationMembers,
   items,
   timezone,
-  destination,
   members,
   viewerId,
 }: {
@@ -185,9 +195,9 @@ export default function DayCard({
   day: TripDay;
   locations: TripDayLocation[];
   locationMembers: Map<string, string[]>;
+  /** Locked items for this day only -- callers filter before passing them in (see page.tsx's Agreed tab). */
   items: Item[];
   timezone: string;
-  destination: string;
   members: TripMemberSummary[];
   viewerId: string;
 }) {
@@ -290,18 +300,11 @@ export default function DayCard({
 
       {itemsOpen && (
         <div className="mt-4 border-t border-stone-100 pt-4">
-          {/* Keyed on the item count so a successful add remounts the
-              builder fresh, collapsing whichever inline form was open back
-              to its "+ Add" button -- see DayItemBuilder for why. */}
-          <DayItemBuilder
-            key={items.length}
-            tripId={tripId}
-            dayId={day.id}
-            items={items}
-            timezone={timezone}
-            destination={destination}
-            members={members}
-          />
+          {items.length === 0 ? (
+            <p className="text-sm text-stone-400">Nothing locked in for this day yet.</p>
+          ) : (
+            <ItemList tripId={tripId} items={items} timezone={timezone} />
+          )}
         </div>
       )}
     </div>

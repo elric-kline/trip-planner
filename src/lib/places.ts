@@ -73,14 +73,23 @@ export async function autocompleteAddress(input: string): Promise<PlaceSuggestio
 }
 
 /**
- * Restricted to Google's "(cities)" type collection -- localities, towns,
- * and villages, not street addresses or businesses. Used for a trip day's
- * wake/sleep/stop locations, which are meant to answer "which town," not a
- * precise address -- that's what an Activity/Lodging/Dining item's own
- * location field is for, and stays on the unrestricted autocompleteAddress.
+ * Restricted to Google's "(regions)" type collection -- localities,
+ * sublocalities, postal codes, and administrative areas, not street
+ * addresses or businesses. Used for a trip day's wake/sleep/stop
+ * locations, which are meant to answer "which place," not a precise
+ * address -- that's what an Activity/Lodging/Dining item's own location
+ * field is for, and stays on the unrestricted autocompleteAddress.
+ *
+ * Deliberately "(regions)", not the narrower "(cities)": "(cities)" only
+ * matches Google's `locality` type -- an incorporated municipality -- and
+ * excludes anything Google classifies as a `sublocality`, which is where a
+ * borough like Brooklyn lives in its data model (administratively part of
+ * New York City, not its own city) despite being exactly the kind of place
+ * someone would type here. "(regions)" includes sublocality alongside
+ * locality, so it doesn't have that gap.
  */
 export async function autocompletePlace(input: string): Promise<PlaceSuggestion[]> {
-  return placeAutocomplete(input, "(cities)");
+  return placeAutocomplete(input, "(regions)");
 }
 
 /**

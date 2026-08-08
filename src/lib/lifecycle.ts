@@ -98,6 +98,23 @@ export function checkRsvp(item: LifecycleItem): Check {
   return ok;
 }
 
+/**
+ * Moves a Scratchpad item into PlaySpace. Author-only, deliberately not
+ * openable by a planner the way editing content is (canEditItem) --
+ * privacy is about who gets to expose someone's own note to the group,
+ * and that call stays exclusively the author's. Locked items must be
+ * unlocked first: a locked private item has no commitment (checkLock's
+ * private branch forbids one), but a locked group item requires one, so
+ * sharing a still-locked item would land it in a state the lock rules
+ * themselves never allow reaching directly.
+ */
+export function checkShare(item: LifecycleItem, actor: Actor): Check {
+  if (item.visibility === "group") return no("This item is already shared.");
+  if (item.status === "locked") return no("Unlock the item before sharing it.");
+  if (!actor.isAuthor) return no("Only the person who added this can share it.");
+  return ok;
+}
+
 /** Where a restored or unlocked item lands: back to a proposal if it has a time. */
 export function statusForTime(startsAt: Date | null): ItemStatus {
   return startsAt ? "proposed" : "idea";
