@@ -185,6 +185,34 @@ test("a tool loop that never reaches a terminal reply gives up after the round b
   assert.match((result as { error: string }).error, /more back-and-forth/);
 });
 
+test("gives up before even calling out if the time budget is already exhausted going in", async (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("should never be called -- the budget check should short-circuit first");
+  });
+
+  const result = await runAssistantTurn("key", "sys", [], "anything", NO_TOOLS, NO_EXECUTORS, 1_000);
+  assert.ok("error" in result);
+  assert.match((result as { error: string }).error, /taking longer than expected/);
+  assert.equal(fetchMock.mock.calls.length, 0);
+});
+
+test("gives up gracefully once the overall time budget runs out mid-loop, instead of grinding through every remaining round on a slow network", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const executors: ToolExecutors = { loopy: async () => ({ ok: true }) };
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    t.mock.timers.tick(20_000); // simulate each round eating a real 20s of a flaky network
+    return toolUseResponse([{ id: "x", name: "loopy", input: {} }]);
+  });
+
+  const result = await runAssistantTurn("key", "sys", [], "loop forever", NO_TOOLS, executors, 45_000);
+  assert.ok("error" in result);
+  assert.match((result as { error: string }).error, /taking longer than expected/);
+  // 45s budget, 8s minimum-per-round floor: round 1 (0->20s) and round 2
+  // (20->40s) both clear the floor; round 3 would start with only 5s left,
+  // so it gives up there instead of firing a third request.
+  assert.equal(fetchMock.mock.calls.length, 2);
+});
+
 test("an empty final reply still returns something rather than blank text", async (t) => {
   t.mock.method(globalThis, "fetch", async () => textResponse(""));
 
