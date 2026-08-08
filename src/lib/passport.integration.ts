@@ -16,6 +16,7 @@ import {
   RuleError,
 } from "./passport.ts";
 import { requireTripAccess } from "./scope.ts";
+import { setMemberRole } from "./trips.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
 
 const TEST_KEY = Buffer.alloc(32, 9).toString("base64");
@@ -168,4 +169,22 @@ test("canViewMemberPassport: always true for your own; true for a fellow trip me
   assert.equal(canViewMemberPassport(participantAccess, planner.id), false, "a participant is not a planner");
 
   assert.equal(canViewMemberPassport(plannerAccess, outsider.id), false, "not even a planner can see a non-member's passport");
+});
+
+test("canViewMemberPassport: an appointed co-planner gets the same passport visibility as the master planner", async (t) => {
+  const owner = await createTestUser();
+  const coPlanner = await createTestUser();
+  const otherMember = await createTestUser();
+  const trip = await createTestTrip(owner);
+  await addTripMember(trip.id, coPlanner.id, "participant");
+  await addTripMember(trip.id, otherMember.id, "participant");
+  t.after(() => cleanupTrip(trip.id, [owner.id, coPlanner.id, otherMember.id]));
+
+  const beforeAccess = await requireTripAccess(trip.id, coPlanner);
+  assert.equal(canViewMemberPassport(beforeAccess, otherMember.id), false, "a plain participant can't see a fellow member's passport");
+
+  await setMemberRole(await requireTripAccess(trip.id, owner), coPlanner.id, "co_planner");
+
+  const afterAccess = await requireTripAccess(trip.id, coPlanner);
+  assert.equal(canViewMemberPassport(afterAccess, otherMember.id), true, "appointing them a co-planner grants the same visibility as the master");
 });

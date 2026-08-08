@@ -3,7 +3,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { invites, trips, tripMembers } from "@/db/schema";
 import type { CurrentUser } from "./auth.ts";
-import { AccessError } from "./scope.ts";
+import { AccessError, type MemberRole, type TripAccess } from "./scope.ts";
 import { autoIncludeSoleLocations, seedDays } from "./days.ts";
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -53,10 +53,42 @@ export async function tripsForUser(user: CurrentUser) {
     .where(eq(tripMembers.userId, user.id));
 }
 
+/**
+ * Appoints a participant as co_planner, or revokes one back to
+ * participant -- unlimited co-planners, no cap, matching "let the planner
+ * appoint co-planners. Unlimited." Any existing planner (master or co) may
+ * do this to any *other* member; co-planners get exactly the same
+ * capabilities as the master everywhere else in the app (see scope.ts's
+ * isPlanner), so there's no reason to additionally restrict who gets to
+ * hand that out.
+ *
+ * The trip's original master_planner is permanently fixed (see schema.ts's
+ * memberRole doc comment) -- can't be revoked, demoted, or reassigned,
+ * including by themselves. That's what guarantees a trip can never end up
+ * with zero planners; there's no "transfer ownership" or "leave the trip"
+ * flow this needs to coordinate with.
+ */
+export async function setMemberRole(
+  access: TripAccess,
+  targetUserId: string,
+  role: "co_planner" | "participant",
+): Promise<void> {
+  if (!access.isPlanner) throw new Error("Only a planner can change member roles.");
+
+  const target = access.members.find((m) => m.userId === targetUserId);
+  if (!target) throw new Error("That person isn't on this trip.");
+  if (target.role === "master_planner") throw new Error("The trip's original planner can't be changed.");
+
+  await db
+    .update(tripMembers)
+    .set({ role })
+    .where(and(eq(tripMembers.tripId, access.trip.id), eq(tripMembers.userId, targetUserId)));
+}
+
 export async function createInvite(
   tripId: string,
   creator: CurrentUser,
-  opts: { email?: string; role?: "master_planner" | "participant" } = {},
+  opts: { email?: string; role?: MemberRole } = {},
 ) {
   const token = randomBytes(24).toString("base64url");
   const [invite] = await db

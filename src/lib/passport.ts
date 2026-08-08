@@ -98,7 +98,17 @@ export async function getPassportPhoto(userId: string): Promise<{ bytes: Buffer;
   return { bytes: decryptBytes(row.photoEncrypted), mimeType: row.photoMimeType };
 }
 
-/** `data:<mime>;base64,...`, ready to drop straight into an `<img src>` -- see AGENTS notes in the profile/trip pages for why this app inlines the photo rather than running a separate image-serving route. Null if there's no photo. */
+/**
+ * `data:<mime>;base64,...`, ready to drop straight into an `<img src>` --
+ * used for the profile page's own preview of your own single photo, where
+ * inlining it costs nothing extra (you're already looking at the page
+ * that's showing it to you). A fellow member's photo instead goes through
+ * the lazy, authenticated /api/trip/[tripId]/members/[userId]/passport-photo
+ * route -- a People list can show several members at once, and inlining
+ * every one of their photos on every load isn't a cost worth paying by
+ * default when a "view photo" link only needs to pay it on click. Null if
+ * there's no photo.
+ */
 export async function getPassportPhotoDataUri(userId: string): Promise<string | null> {
   const photo = await getPassportPhoto(userId);
   if (!photo) return null;

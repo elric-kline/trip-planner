@@ -14,7 +14,7 @@ import {
 
 /**
  * An item's stage of life. The same row moves through these — a pinned idea
- * that gets a time becomes a proposal, and a proposal the Master Planner locks
+ * that gets a time becomes a proposal, and a proposal a planner locks
  * becomes part of the itinerary. Votes, comments and (later) media attach to
  * the item, so the discussion survives the promotion.
  */
@@ -50,7 +50,18 @@ export const transportSubtype = pgEnum("transport_subtype", [
   "other",
 ]);
 
-export const memberRole = pgEnum("member_role", ["master_planner", "participant"]);
+/**
+ * `master_planner` is fixed to whoever created the trip (see trips.ts's
+ * createTrip) -- never reassigned, never revocable, the one guarantee that
+ * a trip can never end up with zero planners. `co_planner` is everything
+ * else a planner can be: appointable (and revocable) by any existing
+ * planner, on any number of participants at once -- there's no cap (see
+ * trips.ts's setMemberRole). Everywhere in the app that gates on "is this
+ * person a planner" (locking items, invites, passport visibility, ...)
+ * treats master_planner and co_planner identically; the distinction only
+ * matters for who can and can't be changed.
+ */
+export const memberRole = pgEnum("member_role", ["master_planner", "co_planner", "participant"]);
 
 export const rsvpResponse = pgEnum("rsvp_response", ["yes", "no", "maybe"]);
 
