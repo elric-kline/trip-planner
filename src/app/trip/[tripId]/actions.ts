@@ -140,7 +140,22 @@ function parseTransportFields(formData: FormData): TransportDetailsInput {
     bookingUrl: str("bookingUrl"),
     costAmount: toNumberOrNull(formData.get("costAmount")),
     costCurrency: str("costCurrency"),
+    destinationName: str("destinationName"),
   };
+}
+
+/**
+ * Geocodes `transport.destinationName` (a drive/rideshare/train's own
+ * endpoint -- irrelevant for a flight, which gets its destination from its
+ * legs instead) and attaches the result, same "re-geocode from whatever
+ * text is there now" approach as the item's own Location field. A failed
+ * or skipped lookup just leaves destinationLat/Lng null -- conflict
+ * analysis can't reason about what comes after this item, same as if the
+ * field had been left blank.
+ */
+async function withGeocodedDestination(transport: TransportDetailsInput): Promise<TransportDetailsInput> {
+  const coords = await geocode(transport.destinationName);
+  return { ...transport, destinationLat: coords?.lat ?? null, destinationLng: coords?.lng ?? null };
 }
 
 /**
@@ -182,7 +197,8 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
   const locationName = String(formData.get("locationName") ?? "") || null;
   const lodging = category === "lodging" ? parseLodgingFields(formData, access.trip.timezone) : null;
   const dining = category === "dining" ? parseDiningFields(formData) : null;
-  const transport = category === "transport" ? parseTransportFields(formData) : null;
+  const transport =
+    category === "transport" ? await withGeocodedDestination(parseTransportFields(formData)) : null;
 
   // A lodging item's real location is its address, not the free-text
   // "Location" label — prefer that for the lookup when both are given.
@@ -453,7 +469,7 @@ export async function updateTransportDetailsAction(
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
-  const transport = parseTransportFields(formData);
+  const transport = await withGeocodedDestination(parseTransportFields(formData));
 
   try {
     await upsertTransportDetails(access, itemId, transport);

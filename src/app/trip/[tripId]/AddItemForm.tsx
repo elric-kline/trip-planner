@@ -51,6 +51,8 @@ export default function AddItemForm({
   visibility,
   dayId,
   afterItemId,
+  precedingLocationName,
+  followingLocationName,
   onCancel,
 }: {
   tripId: string;
@@ -69,6 +71,19 @@ export default function AddItemForm({
   dayId?: string;
   /** Where in that day's draft order to insert -- omitted appends to the end. Ignored once the item gets a startsAt, which always governs order instead. */
   afterItemId?: string;
+  /**
+   * The items immediately before/after the gap this form was opened in --
+   * only set for a between-two-items "+ Add" (see DayItemBuilder.tsx), never
+   * for the always-visible end-of-day slot (nothing follows an append) or
+   * a tab-level add (no adjacent items at all). Prefills Location/
+   * Destination when the subtype is drive or rideshare: a car ride that's
+   * literally the gap between two stops starts and ends exactly where
+   * they are, same reasoning as the item's own door-to-door startsAt/endsAt.
+   * A train needs an actual station, not an item's address, so it's left
+   * out of the auto-fill even though the field itself is still there.
+   */
+  precedingLocationName?: string | null;
+  followingLocationName?: string | null;
   /** Shown next to Add only for the compact, day-scoped form -- a tab-level form has nothing to collapse back into. */
   onCancel?: () => void;
 }) {
@@ -80,6 +95,7 @@ export default function AddItemForm({
   const isLodging = category === "lodging";
   const isDining = category === "dining";
   const isTransport = category === "transport";
+  const autoFillsFromGap = isTransport && (transportSubtype === "drive" || transportSubtype === "rideshare");
 
   function onRestaurantConfirmed(details: PlaceDetails, placeId: string) {
     setDiningPrefill((prev) => ({
@@ -141,9 +157,9 @@ export default function AddItemForm({
           <option value="other">Other</option>
         </select>
         <AddressAutocomplete
-          key={`location-${diningPrefill?.version ?? 0}`}
+          key={`location-${diningPrefill?.version ?? 0}-${isTransport ? transportSubtype : ""}`}
           name="locationName"
-          defaultValue={diningPrefill?.locationName}
+          defaultValue={diningPrefill?.locationName ?? (autoFillsFromGap ? (precedingLocationName ?? undefined) : undefined)}
           placeholder="Location (optional)"
           className="input"
         />
@@ -320,6 +336,22 @@ export default function AddItemForm({
               Flight numbers and connections (for a multi-leg itinerary) can be added on the item&apos;s own page
               once it&apos;s created.
             </p>
+          )}
+          {transportSubtype !== "flight" && (
+            <>
+              <AddressAutocomplete
+                key={`destination-${transportSubtype}`}
+                name="destinationName"
+                defaultValue={autoFillsFromGap ? (followingLocationName ?? undefined) : undefined}
+                placeholder="Destination (optional)"
+                className="input"
+              />
+              <p className="-mt-2 text-xs text-stone-400">
+                {autoFillsFromGap
+                  ? "Filled in from the stops on either side of this gap — adjust if this isn't a direct trip between them."
+                  : "Where this trip ends up, if different from Location — lets the conflict checker estimate travel from here, not from where it started."}
+              </p>
+            </>
           )}
           <div className="grid grid-cols-2 gap-3">
             <input name="confirmationNumber" placeholder="Confirmation number" className="input" />

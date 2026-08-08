@@ -264,6 +264,59 @@ test("conflictsForViewer treats a flight with no resolvable landing point as una
   assert.equal(flightToLodging?.severity, "ok");
 });
 
+test("conflictsForViewer uses a drive's own destination, not its departure, for the next item -- same fix as flights, for the non-leg subtypes", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  // Drove from the airport (EWR-ish coordinates) to a Seattle rooftop --
+  // the drive's own `location` is the departure point; destinationLat/Lng
+  // is where it actually drops you off.
+  const drive = await createItem(plannerAccess, {
+    title: "Drive to the rooftop",
+    category: "transport",
+    locationLat: EWR.lat,
+    locationLng: EWR.lng,
+  });
+  await upsertTransportDetails(plannerAccess, drive.id, {
+    subtype: "drive",
+    destinationLat: SEATTLE_LODGING.lat,
+    destinationLng: SEATTLE_LODGING.lng,
+  });
+  const scheduledDrive = await scheduleItem(
+    plannerAccess,
+    drive.id,
+    new Date("2026-09-12T08:00:00Z"),
+    new Date("2026-09-12T12:00:00Z"),
+  );
+  await lockItem(plannerAccess, scheduledDrive.id, "required");
+
+  await lockItem(
+    plannerAccess,
+    (
+      await scheduleItem(
+        plannerAccess,
+        (
+          await createItem(plannerAccess, {
+            title: "Rooftop dinner",
+            locationLat: SEATTLE_LODGING.lat,
+            locationLng: SEATTLE_LODGING.lng,
+          })
+        ).id,
+        new Date("2026-09-12T13:00:00Z"),
+        null,
+      )
+    ).id,
+    "required",
+  );
+
+  const findings = flagged(await conflictsForViewer(plannerAccess));
+  assert.deepEqual(
+    findings,
+    [],
+    "arriving and dining in the same spot shouldn't read as still needing to drive cross-country from where the drive started",
+  );
+});
+
 test("groupTimelineFor: required items always included; optional items only when the member RSVP'd yes", async (t) => {
   const { trip, userIds, plannerAccess, memberA } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));

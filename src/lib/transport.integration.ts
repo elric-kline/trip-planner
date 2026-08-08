@@ -29,6 +29,27 @@ test("getTransportDetails is null until something is saved; upsertTransportDetai
   assert.equal(second?.confirmationNumber, "SNCF2");
 });
 
+test("upsertTransportDetails round-trips a non-flight subtype's own destination -- distinct from the item's own location, which is its departure point", async (t) => {
+  const planner = await createTestUser();
+  const trip = await createTestTrip(planner);
+  t.after(() => cleanupTrip(trip.id, [planner.id]));
+  const access = await requireTripAccess(trip.id, planner);
+
+  const item = await createItem(access, { title: "Drive to the coast", category: "transport" });
+  const saved = await upsertTransportDetails(access, item.id, {
+    subtype: "drive",
+    destinationName: "Half Moon Bay, CA",
+    destinationLat: 37.4636,
+    destinationLng: -122.4286,
+  });
+  assert.equal(saved.destinationName, "Half Moon Bay, CA");
+  assert.equal(saved.destinationLat, 37.4636);
+  assert.equal(saved.destinationLng, -122.4286);
+
+  const fetched = await getTransportDetails(item.id);
+  assert.equal(fetched?.destinationName, "Half Moon Bay, CA");
+});
+
 test("upsertTransportDetails rejects a non-transport item and a bookedBy who isn't on the trip", async (t) => {
   const planner = await createTestUser();
   const outsider = await createTestUser();
