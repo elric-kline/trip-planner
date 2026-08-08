@@ -10,6 +10,14 @@ import { DIETARY_TAGS, DIETARY_TAG_LABEL, type DietaryTag } from "@/lib/dietary.
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
 const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
+const TRANSPORT_SUBTYPES = ["flight", "train", "drive", "rideshare", "other"] as const;
+const TRANSPORT_SUBTYPE_LABEL: Record<(typeof TRANSPORT_SUBTYPES)[number], string> = {
+  flight: "Flight",
+  train: "Train",
+  drive: "Drive",
+  rideshare: "Rideshare",
+  other: "Other",
+};
 
 type DiningPrefill = {
   version: number;
@@ -67,9 +75,11 @@ export default function AddItemForm({
   const [category, setCategory] = useState<Category>("activity");
   const [diningPrefill, setDiningPrefill] = useState<DiningPrefill | null>(null);
   const [titleHasValue, setTitleHasValue] = useState(false);
+  const [transportSubtype, setTransportSubtype] = useState<(typeof TRANSPORT_SUBTYPES)[number]>("other");
   const titleRef = useRef<HTMLInputElement>(null);
   const isLodging = category === "lodging";
   const isDining = category === "dining";
+  const isTransport = category === "transport";
 
   function onRestaurantConfirmed(details: PlaceDetails, placeId: string) {
     setDiningPrefill((prev) => ({
@@ -279,6 +289,54 @@ export default function AddItemForm({
             className="input"
             rows={2}
           />
+        </div>
+      )}
+
+      {isTransport && (
+        <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
+          <p className="text-xs font-medium text-stone-500">Transport details</p>
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              name="subtype"
+              className="input"
+              value={transportSubtype}
+              onChange={(e) => setTransportSubtype(e.target.value as typeof transportSubtype)}
+            >
+              {TRANSPORT_SUBTYPES.map((s) => (
+                <option key={s} value={s}>
+                  {TRANSPORT_SUBTYPE_LABEL[s]}
+                </option>
+              ))}
+            </select>
+            {transportSubtype === "flight" && (
+              <label className="flex items-center gap-2 text-sm text-stone-700">
+                <input type="checkbox" name="international" />
+                International
+              </label>
+            )}
+          </div>
+          {transportSubtype === "flight" && (
+            <p className="-mt-1 text-xs text-stone-400">
+              Flight numbers and connections (for a multi-leg itinerary) can be added on the item&apos;s own page
+              once it&apos;s created.
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
+            <select name="bookedBy" defaultValue="" className="input">
+              <option value="">Booked under (optional)</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name ?? m.email}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <input name="costAmount" type="number" step="any" placeholder="Cost" className="input" />
+            <input name="costCurrency" placeholder="USD" className="input" maxLength={8} />
+          </div>
+          <input name="bookingUrl" type="url" placeholder="Booking link (optional)" className="input" />
         </div>
       )}
 

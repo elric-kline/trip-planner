@@ -42,6 +42,14 @@ export const itemCategory = pgEnum("item_category", [
   "other",
 ]);
 
+export const transportSubtype = pgEnum("transport_subtype", [
+  "flight",
+  "train",
+  "drive",
+  "rideshare",
+  "other",
+]);
+
 export const memberRole = pgEnum("member_role", ["master_planner", "participant"]);
 
 export const rsvpResponse = pgEnum("rsvp_response", ["yes", "no", "maybe"]);
@@ -447,3 +455,76 @@ export const diningDetails = pgTable("dining_details", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Category-specific fields for a transport item, one row per item -- same
+ * pattern as lodgingDetails/diningDetails. `subtype` is what lib/transport.ts
+ * keys its buffer logic on: a flight needs security-line and bag-claim
+ * padding a train doesn't, driving needs a parking allowance, a rideshare
+ * needs a pickup-wait buffer instead of a boarding one. See
+ * lib/transport.ts's transportBufferFor.
+ *
+ * The item's own startsAt/endsAt is still the door-to-door span, same
+ * reasoning as lodging's check-in/out (see lodgingDetails above) -- for a
+ * flight with connections that's the first leg's departure to the last
+ * leg's arrival, kept in sync with transportLegs by lib/transport.ts's
+ * setTransportLegs rather than edited by hand.
+ *
+ * `international` only means anything for subtype "flight" -- it widens
+ * both the pre-departure buffer (extra check-in/security/customs time) and
+ * the minimum layover a connection gets flagged for. Null/false is the
+ * domestic default.
+ */
+export const transportDetails = pgTable("transport_details", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => items.id, { onDelete: "cascade" }),
+  subtype: transportSubtype("subtype").notNull(),
+  international: boolean("international"),
+  confirmationNumber: text("confirmation_number"),
+  /** Must be a member of the trip — enforced in lib/transport.ts, not here. */
+  bookedBy: uuid("booked_by").references(() => users.id),
+  bookingUrl: text("booking_url"),
+  costAmount: doublePrecision("cost_amount"),
+  /** ISO 4217, e.g. "USD" — free text, not validated against a currency list. */
+  costCurrency: text("cost_currency"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One row per leg of a flight's routing -- a nonstop flight has exactly one
+ * row, a connecting itinerary has one per segment, ordered by `legOrder`
+ * starting at 0. Only meaningful when the parent transportDetails.subtype
+ * is "flight"; lib/transport.ts enforces that, not a DB constraint, same
+ * division of labor as lodgingDetails.bookedBy.
+ *
+ * departsAt/arrivesAt are what the item's own startsAt/endsAt get derived
+ * from (first leg's departure, last leg's arrival -- see
+ * deriveScheduleFromLegs) and what lib/transport.ts's analyzeLegLayovers
+ * checks each connection's dwell time against: a layover shorter than the
+ * minimum connection time is itself worth flagging, separate from the
+ * door-to-door buffer transportBufferFor adds around the whole item.
+ */
+export const transportLegs = pgTable(
+  "transport_legs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    legOrder: integer("leg_order").notNull(),
+    airline: text("airline"),
+    flightNumber: text("flight_number"),
+    /** Free-text airport code, e.g. "SFO" -- not validated against an IATA list. */
+    departureAirport: text("departure_airport"),
+    arrivalAirport: text("arrival_airport"),
+    departsAt: timestamp("departs_at", { withTimezone: true }).notNull(),
+    arrivesAt: timestamp("arrives_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("transport_legs_item_order_idx").on(t.itemId, t.legOrder),
+    index("transport_legs_item_idx").on(t.itemId),
+  ],
+);
