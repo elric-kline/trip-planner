@@ -238,3 +238,18 @@ export class AeroDataBoxFlightStatusProvider implements FlightStatusProvider {
     return { ok: true, flights: flights ?? [] };
   }
 }
+
+/**
+ * What a page should actually use: AeroDataBox when AERODATABOX_API_KEY is
+ * configured, Noop (no network) when it isn't -- the same "unset key means
+ * this quietly does nothing" degrade every other optional integration in
+ * this app follows (see .env.example). Deliberately not conflicts-for.ts's
+ * own default, which stays NoopFlightStatusProvider so its test suite
+ * never depends on whatever happens to be set in the environment it runs
+ * in -- a page that wants live data asks for it explicitly by calling this.
+ */
+export function defaultFlightStatusProvider(): FlightStatusProvider {
+  return process.env.AERODATABOX_API_KEY
+    ? new AeroDataBoxFlightStatusProvider()
+    : new NoopFlightStatusProvider();
+}

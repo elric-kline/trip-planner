@@ -4,6 +4,7 @@ import {
   AeroDataBoxFlightStatusProvider,
   NoopFlightStatusProvider,
   candidateDates,
+  defaultFlightStatusProvider,
   effectiveLegTimes,
   toFlightStatus,
   type FlightStatus,
@@ -23,6 +24,15 @@ test("NoopFlightStatusProvider always resolves null and never touches the networ
   const result = await provider.lookup({ flightNumber: "UA123", departureDate: "2026-08-10" });
   assert.equal(result, null);
   assert.equal(fetchMock.mock.calls.length, 0);
+});
+
+test("defaultFlightStatusProvider: picks AeroDataBox when the key is set, Noop when it isn't", () => {
+  clearEnv();
+  assert.ok(defaultFlightStatusProvider() instanceof NoopFlightStatusProvider);
+
+  process.env.AERODATABOX_API_KEY = "test_key";
+  assert.ok(defaultFlightStatusProvider() instanceof AeroDataBoxFlightStatusProvider);
+  clearEnv();
 });
 
 test("candidateDates: the given date first, then the day before and the day after", () => {
