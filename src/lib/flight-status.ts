@@ -13,18 +13,34 @@
  * what conflict analysis defaults to, so nothing calls out to a live API
  * unless a caller explicitly asks for it.
  *
- * NOTE: the response fields parsed below reflect AeroDataBox's documented
- * response shape as of this writing. This integration has not been
- * exercised against a real API key -- verify field names against a live
- * call (or AeroDataBox's OpenAPI schema) before relying on it in
- * production; toFlightStatus is written defensively (every field optional)
- * so a schema drift degrades to nulls/"unknown" rather than throwing.
+ * Path, params, and response fields below are checked against AeroDataBox's
+ * published OpenAPI spec (the "Number/Reg/CallSign/Icao24" FlightSearchByEnum
+ * and FlightAirportMovementContract schemas -- see GetFlight_FlightOnSpecificDate),
+ * not against a live call with a real key -- this account has no traffic on
+ * it yet. toFlightStatus is written defensively (every field optional) so
+ * any remaining schema drift degrades to nulls/"unknown" rather than
+ * throwing, but treat the exact field names as "spec-checked," not
+ * "observed," until a real response has actually been logged once.
+ *
+ * NOTE: GetBalance (GET /subscriptions/balance) is NOT this API -- per the
+ * spec it's the Flight Alert (webhook) product's own credit system,
+ * explicitly separate from the RapidAPI marketplace quota that flight
+ * status lookups here are billed against. Checking it tells you nothing
+ * about whether these calls are working.
  */
 
 export type FlightStatusQuery = {
   /** e.g. "UA123" -- airline code + number, no space. */
   flightNumber: string;
-  /** The flight's departure date, in the departure airport's local calendar date (YYYY-MM-DD) -- flight numbers are reused daily, so a lookup needs both. */
+  /**
+   * The flight's departure date as YYYY-MM-DD. AeroDataBox's dateLocal
+   * parameter wants the *airport-local* calendar date; what's actually
+   * passed here (see conflicts-for.ts's utcCalendarDate) is the UTC date of
+   * the leg's stored departsAt instant, a simplification -- for a flight
+   * departing within a few hours of local midnight, that can be the wrong
+   * calendar day and miss the match entirely. Fixing this properly needs
+   * the departure airport's timezone, which transport_legs doesn't store.
+   */
   departureDate: string;
 };
 
@@ -86,9 +102,18 @@ export function effectiveLegTimes(
 }
 
 const AERODATABOX_HOST = "aerodatabox.p.rapidapi.com";
-const AERODATABOX_URL = `https://${AERODATABOX_HOST}/flights/number`;
+/** GET /flights/{searchBy}/{searchParam}/{dateLocal} -- searchBy is a case-sensitive enum (Number/Reg/CallSign/Icao24); "Number" is what a flight-number lookup needs. */
+const AERODATABOX_FLIGHTS_URL = `https://${AERODATABOX_HOST}/flights/Number`;
 
 type AeroDataBoxTime = { utc?: string; local?: string };
+/**
+ * FlightAirportMovementContract per the spec. revisedTime is the
+ * airline/ATC-confirmed current estimate; runwayTime is the confirmed
+ * actual (off-block/on-block). The schema also has a predictedTime
+ * (AeroDataBox's own model, ahead of an official revision) and
+ * checkInDesk/runway -- not consumed here; add them if "estimated" should
+ * ever prefer a prediction over waiting for an official revision.
+ */
 type AeroDataBoxEndpoint = {
   scheduledTime?: AeroDataBoxTime;
   revisedTime?: AeroDataBoxTime;
@@ -152,7 +177,12 @@ export class AeroDataBoxFlightStatusProvider implements FlightStatusProvider {
       return null;
     }
 
-    const url = `${AERODATABOX_URL}/${encodeURIComponent(query.flightNumber)}/${query.departureDate}`;
+    // dateLocalRole=Departure -- our date is (an approximation of) the
+    // departure-side calendar date, not the arrival side; see
+    // FlightStatusQuery.departureDate's doc for the UTC-vs-local caveat.
+    const url =
+      `${AERODATABOX_FLIGHTS_URL}/${encodeURIComponent(query.flightNumber)}/${query.departureDate}` +
+      `?dateLocalRole=Departure`;
 
     let response: Response;
     try {

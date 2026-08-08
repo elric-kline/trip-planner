@@ -150,7 +150,10 @@ test("AeroDataBoxFlightStatusProvider: a successful lookup parses the first entr
   assert.equal(result?.estimatedDepartsAt?.toISOString(), "2026-08-10T08:20:00.000Z");
 
   const [url, init] = fetchMock.mock.calls[0].arguments as [string, RequestInit];
-  assert.equal(url, "https://aerodatabox.p.rapidapi.com/flights/number/UA123/2026-08-10");
+  assert.equal(
+    url,
+    "https://aerodatabox.p.rapidapi.com/flights/Number/UA123/2026-08-10?dateLocalRole=Departure",
+  );
   assert.equal((init.headers as Record<string, string>)["X-RapidAPI-Key"], "test_key");
   clearEnv();
 });
