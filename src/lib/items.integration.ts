@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { diningDetails, itemRsvps, lodgingDetails } from "@/db/schema";
+import { diningDetails, itemRsvps, lodgingDetails, transportDetails, transportLegs } from "@/db/schema";
 import {
   createItem,
   deleteItem,
@@ -218,6 +218,27 @@ test("category-specific details (dining_details) are also orphaned on a category
 
   const after = await db.select().from(diningDetails).where(eq(diningDetails.itemId, item.id));
   assert.equal(after.length, 0);
+});
+
+test("category-specific details (transport_details and transport_legs) are also orphaned on a category change away from transport", async (t) => {
+  const { trip, userIds, authorAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const item = await createItem(authorAccess, { title: "Connecting flight", category: "transport" });
+  await db.insert(transportDetails).values({ itemId: item.id, subtype: "flight" });
+  await db.insert(transportLegs).values({
+    itemId: item.id,
+    legOrder: 0,
+    departsAt: new Date("2026-08-10T08:00:00Z"),
+    arrivesAt: new Date("2026-08-10T10:00:00Z"),
+  });
+
+  await updateItemDetails(authorAccess, item.id, { category: "other" });
+
+  const afterDetails = await db.select().from(transportDetails).where(eq(transportDetails.itemId, item.id));
+  assert.equal(afterDetails.length, 0);
+  const afterLegs = await db.select().from(transportLegs).where(eq(transportLegs.itemId, item.id));
+  assert.equal(afterLegs.length, 0, "legs reference the item directly, not transport_details, so they need their own cleanup");
 });
 
 test("shareItem: moves a private idea to group, author-only, and blocked once already shared", async (t) => {
