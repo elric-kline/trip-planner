@@ -47,9 +47,9 @@ export default async function ProfilePage({
             Visible to co-members on any trip you&apos;re on — this is what lets the group avoid picking a
             restaurant that won&apos;t work for you.
           </p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-4 sm:grid-cols-3">
             {DIETARY_TAGS.map((tag) => (
-              <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
+              <label key={tag} className="check-label">
                 <input
                   type="checkbox"
                   name="dietaryRestrictions"

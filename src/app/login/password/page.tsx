@@ -22,12 +22,18 @@ export default async function PasswordStepPage({
   return (
     <div className="mx-auto max-w-sm">
       <h1 className="mb-1 text-xl font-semibold">Enter your password</h1>
-      <p className="mb-6 text-sm text-stone-500">
-        Signing in as <strong className="font-medium text-stone-700">{email}</strong>.{" "}
-        <a href={`/login?next=${encodeURIComponent(next ?? "/trips")}`} className="link">
-          Not you?
-        </a>
+      {/* "Not you?" on its own row rather than trailing the sentence: inline in
+          body text it's a ~17px target, and it's the only way back to the front
+          door from here. */}
+      <p className="text-sm text-stone-500">
+        Signing in as <strong className="font-medium text-stone-700">{email}</strong>.
       </p>
+      <a
+        href={`/login?next=${encodeURIComponent(next ?? "/trips")}`}
+        className="link mb-4 inline-flex min-h-11 items-center text-sm"
+      >
+        Not you?
+      </a>
 
       {error && (
         <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>

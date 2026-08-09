@@ -73,7 +73,16 @@ export async function startServer(): Promise<Server> {
   const baseUrl = `http://127.0.0.1:${port}`;
   const child: ChildProcess = spawn("npx", ["next", "start", "-p", String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      // Throwaway 32 zero bytes, base64. Not a secret and not protecting
+      // anything -- it exists because isEncryptionConfigured() gates the
+      // entire passport form, so without a key that whole section of Profile
+      // renders as "not available yet" and is never checked by anything.
+      // Found by mutation: a deliberately broken field there went unnoticed.
+      PASSPORT_ENCRYPTION_KEY: process.env.PASSPORT_ENCRYPTION_KEY || Buffer.alloc(32).toString("base64"),
+    },
   });
 
   // Kept so a failed boot can say what the server actually printed, rather

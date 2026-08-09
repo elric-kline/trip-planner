@@ -122,9 +122,9 @@ export default function DiningFields({
       />
       <div key={`accommodates-${version}`}>
         <p className="mb-1 text-xs text-stone-500">Accommodates</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-4 sm:grid-cols-3">
           {DIETARY_TAGS.map((tag) => (
-            <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
+            <label key={tag} className="check-label">
               <input
                 type="checkbox"
                 name="accommodates"

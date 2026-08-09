@@ -130,14 +130,18 @@ jobs:
       - run: npm run db:migrate
       - run: npm run test:coverage
 
-  # Route and redirect smoke: the only job that exercises src/app at all. The
-  # coverage job deliberately scopes itself to src/lib, which leaves nine
-  # server-action modules and ~57 redirect() call sites with no automated
-  # signal -- and "where does this land" is exactly the kind of defect that
-  # reached main repeatedly. Runs against a real production build in a real
-  # browser, and asserts only status codes, final URLs, and the absence of
-  # browser errors; see src/smoke/harness.ts for why the vocabulary is that
-  # narrow.
+  # The only job that exercises src/app at all. The coverage job deliberately
+  # scopes itself to src/lib, which leaves nine server-action modules and ~57
+  # redirect() call sites with no automated signal -- and "where does this
+  # land" is exactly the kind of defect that reached main repeatedly.
+  #
+  # Runs a real production build in a real browser at 390x844, and asks two
+  # questions: did each flow land in the right place (status codes, final URLs,
+  # no browser errors), and is the page it landed on usable in a hand (44px
+  # targets, the 16px iOS zoom threshold, no horizontal overflow, no clipped
+  # placeholder). Both deliberately avoid asserting on DOM shape -- see
+  # src/smoke/README.md for why that restraint is what makes this safe to gate
+  # merges on.
   smoke:
     runs-on: ubuntu-latest
     services:
