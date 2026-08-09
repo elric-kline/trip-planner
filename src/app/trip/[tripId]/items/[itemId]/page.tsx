@@ -8,8 +8,11 @@ import { getDiningDetails } from "@/lib/dining.ts";
 import { getTransportDetails, getTransportLegs } from "@/lib/transport.ts";
 import { analyzeLegLayovers, transportBufferFor } from "@/lib/transport-buffer.ts";
 import { dietaryWarningsForItem } from "@/lib/dietary-conflicts-for.ts";
+import { listComments } from "@/lib/comments.ts";
 import {
+  addCommentAction,
   declineItemAction,
+  deleteCommentAction,
   deleteItemAction,
   lockPrivateItemAction,
   restoreItemAction,
@@ -93,6 +96,7 @@ export default async function ItemPage({
   const { edit, error } = await searchParams;
 
   const attendance = await attendanceFor(access, item);
+  const comments = await listComments(access, itemId);
   // Asked for whenever an answer is possible at all, not just once locked --
   // the button has to show which way the viewer already leaned on a proposal.
   const myResponse = checkRsvp(item).ok ? await myRsvp(access, itemId) : null;
@@ -630,6 +634,55 @@ export default async function ItemPage({
             </Panel>
           )}
 
+          {/* Discussion lives on the item so it survives the promotion from
+              idea to proposal to locked plan -- the reason something was
+              suggested is worth having while the group decides, and again
+              months later when somebody asks why it's on the itinerary. */}
+          <Panel title={comments.length === 1 ? "1 comment" : `${comments.length} comments`}>
+            {comments.length > 0 && (
+              <ul className="mb-4 space-y-3">
+                {comments.map((c) => (
+                  <li key={c.id} className="text-sm">
+                    <div className="flex flex-wrap items-center gap-x-3">
+                      <span className="font-medium text-stone-700">{c.authorName ?? c.authorEmail}</span>
+                      <span className="text-stone-500">{longDate(c.createdAt)}</span>
+                      {(c.userId === access.viewer.id || access.isPlanner) && (
+                        <form action={deleteCommentAction.bind(null, tripId, itemId, c.id)}>
+                          {/* The item has its own Delete further down, so this
+                              one spells out what it removes for anyone who
+                              can't see which panel it sits in. */}
+                          <button
+                            aria-label="Delete this comment"
+                            className="-mx-2 inline-flex min-h-11 items-center px-2 text-stone-500 underline hover:text-stone-800"
+                          >
+                            Delete
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                    <p className="mt-0.5 whitespace-pre-wrap text-stone-700">{c.body}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form action={addCommentAction.bind(null, tripId, itemId)} className="grid gap-2">
+              <textarea
+                name="body"
+                required
+                rows={2}
+                placeholder={
+                  item.visibility === "private"
+                    ? "A note to yourself about this"
+                    : "Why this one? Anything the group should know?"
+                }
+                className="input"
+              />
+              <button type="submit" className="btn-secondary justify-self-start">
+                Post
+              </button>
+            </form>
+          </Panel>
+
           {/* Lifecycle actions -- deliberately not part of the Save above. */}
           <section className="flex flex-wrap items-center gap-3">
             {anyEditable && (
@@ -671,7 +724,10 @@ export default async function ItemPage({
             )}
             {deleteAllowed && (
               <form action={deleteItemAction.bind(null, tripId, itemId)}>
-                <button className="-mx-2 inline-flex min-h-11 items-center px-2 text-sm text-red-600 underline">
+                <button
+                  aria-label="Delete this item"
+                  className="-mx-2 inline-flex min-h-11 items-center px-2 text-sm text-red-600 underline"
+                >
                   Delete
                 </button>
               </form>

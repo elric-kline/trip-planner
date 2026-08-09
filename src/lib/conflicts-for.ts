@@ -1,6 +1,6 @@
 import type { Coordinates, TravelTimeProvider } from "./travel.ts";
 import { HaversineTravelTimeProvider } from "./travel.ts";
-import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
+import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, windowsOverlap, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
 import { rsvpsForItems } from "./attendance.ts";
 import { listItems, type Item, type TripAccess, type TripMemberSummary } from "./scope.ts";
 import { getTransportDetailsForItems, getTransportLegsForItems, type TransportLeg } from "./transport.ts";
@@ -207,6 +207,29 @@ export type LockImpact = {
 };
 
 /**
+ * Somebody who hasn't yet said whether they're in for something that overlaps
+ * the candidate. Their timeline can't include that item, so a clean check is
+ * only clean *so far* -- if they say yes later, the clash appears.
+ *
+ * This is the honest half of the answer. The preview used to report "No new
+ * conflicts for anyone" while looking straight past exactly this case, which
+ * is a confident sentence about an incomplete check at the moment somebody is
+ * committing the whole group.
+ */
+export type LockBlindSpot = {
+  itemId: string;
+  title: string;
+  members: TripMemberSummary[];
+};
+
+export type LockPreview = {
+  /** Whose schedules this check actually covered. */
+  checked: TripMemberSummary[];
+  impacts: LockImpact[];
+  blindSpots: LockBlindSpot[];
+};
+
+/**
  * What locking `candidate` with `commitment` would do to each affected
  * member's schedule — the check a planner sees before confirming a lock.
  * Only inspects group items, so it can run for every member without
@@ -218,8 +241,9 @@ export async function previewLockImpact(
   commitment: "required" | "optional",
   travelProvider: TravelTimeProvider = new HaversineTravelTimeProvider(),
   flightStatusProvider: FlightStatusProvider = new NoopFlightStatusProvider(),
-): Promise<LockImpact[]> {
-  if (!candidate.startsAt || candidate.visibility !== "group") return [];
+): Promise<LockPreview> {
+  const empty: LockPreview = { checked: [], impacts: [], blindSpots: [] };
+  if (!candidate.startsAt || candidate.visibility !== "group") return empty;
 
   // The candidate is itself a proposal, so it now comes back in this list --
   // leaving it in would have it collide with itself and report the lock as its
@@ -251,5 +275,23 @@ export async function previewLockImpact(
     if (newFindings.length > 0) impacts.push({ member, newFindings });
   }
 
-  return impacts;
+  // Overlapping group items that some checked member hasn't committed to yet.
+  // A "no" isn't a blind spot -- they've decided. An absent answer or a
+  // "maybe" is, because it can still turn into a yes and put them on both.
+  const blindSpots: LockBlindSpot[] = [];
+  for (const other of existing) {
+    if (other.commitment === "required") continue; // already on everyone
+    if (!windowsOverlap({ startsAt: candidate.startsAt, endsAt: candidate.endsAt },
+                        { startsAt: other.startsAt!, endsAt: other.endsAt })) continue;
+
+    const undecided = affected.filter((m) => {
+      const answer = rsvpMap.get(other.id)?.get(m.userId);
+      return answer !== "yes" && answer !== "no";
+    });
+    if (undecided.length > 0) {
+      blindSpots.push({ itemId: other.id, title: other.title, members: undecided });
+    }
+  }
+
+  return { checked: affected, impacts, blindSpots };
 }

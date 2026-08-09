@@ -370,8 +370,13 @@ export const items = pgTable(
 );
 
 /**
- * Only recorded for optional items. Attendance on required items is derived
- * from trip membership — see lib/attendance.ts — so nobody can drift off the bus.
+ * One person's answer about one item, recorded from the moment it's proposed
+ * rather than only once it's locked — that's what lets a planner see who
+ * actually wants something before choosing what to lock (see
+ * lib/lifecycle.ts's checkRsvp). The same row carries through the lock.
+ *
+ * Never recorded for required items: attendance there is derived from trip
+ * membership — see lib/attendance.ts — so nobody can drift off the bus.
  */
 export const itemRsvps = pgTable(
   "item_rsvps",
@@ -389,6 +394,32 @@ export const itemRsvps = pgTable(
     primaryKey({ columns: [t.itemId, t.userId] }),
     index("item_rsvps_user_idx").on(t.userId),
   ],
+);
+
+/**
+ * Discussion, one thread per item. Kept on the item rather than on the trip
+ * so it survives the idea -> proposal -> locked promotion: the reason a place
+ * was suggested is worth having when the group is deciding, and worth having
+ * again when somebody asks months later why it's on the itinerary.
+ *
+ * Scope comes from the item, not from a column here. lib/scope.ts already
+ * decides who can see an item at all, so a comment on a private item is
+ * visible to exactly the person the item is.
+ */
+export const itemComments = pgTable(
+  "item_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("item_comments_item_idx").on(t.itemId, t.createdAt)],
 );
 
 export const lodgingPaymentStatus = pgEnum("lodging_payment_status", [
