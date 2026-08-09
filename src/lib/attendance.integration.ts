@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { attendanceFor, attendingItems, myRsvp, rsvpsForItems } from "./attendance.ts";
-import { createItem, lockItem, scheduleItem, setRsvp } from "./items.ts";
+import { createItem, declineItem, lockItem, restoreItem, scheduleItem, setRsvp } from "./items.ts";
 import { requireTripAccess } from "./scope.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
 
@@ -31,9 +31,10 @@ test("a private item is attended by exactly its author, automatically, regardles
   assert.deepEqual(attendance.declined, []);
 });
 
-test("an unlocked group item has no attendance yet", async (t) => {
-  const { trip, userIds, plannerAccess } = await setupTrip();
+test("a proposal reports its support, so a planner can see it before locking", async (t) => {
+  const { trip, userIds, memberA, plannerAccess } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));
+  const memberAAccess = await requireTripAccess(trip.id, memberA);
 
   const proposed = await scheduleItem(
     plannerAccess,
@@ -41,8 +42,45 @@ test("an unlocked group item has no attendance yet", async (t) => {
     new Date("2026-07-01T18:00:00Z"),
     null,
   );
-  const attendance = await attendanceFor(plannerAccess, proposed);
+
+  const before = await attendanceFor(plannerAccess, proposed);
+  assert.deepEqual(before.attendees, [], "nobody has answered yet");
+  assert.equal(before.awaiting.length, 3, "all three members are awaiting, not invisible");
+
+  await setRsvp(memberAAccess, proposed.id, "yes");
+
+  const after = await attendanceFor(plannerAccess, proposed);
+  assert.deepEqual(
+    after.attendees.map((m) => m.userId),
+    [memberA.id],
+    "support on a proposal is visible without locking it first",
+  );
+});
+
+test("a declined item reports nobody, even though its answers are kept", async (t) => {
+  const { trip, userIds, memberA, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+  const memberAAccess = await requireTripAccess(trip.id, memberA);
+
+  const proposed = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Rained-off picnic" })).id,
+    new Date("2026-07-02T12:00:00Z"),
+    null,
+  );
+  await setRsvp(memberAAccess, proposed.id, "yes");
+  const declined = await declineItem(plannerAccess, proposed.id);
+
+  const attendance = await attendanceFor(plannerAccess, declined);
   assert.deepEqual(attendance, { attendees: [], awaiting: [], declined: [], automatic: false });
+
+  const restored = await restoreItem(plannerAccess, declined.id);
+  const back = await attendanceFor(plannerAccess, restored);
+  assert.deepEqual(
+    back.attendees.map((m) => m.userId),
+    [memberA.id],
+    "restoring brings the support back with it",
+  );
 });
 
 test("a locked required item puts every current member on automatically -- no RSVP needed", async (t) => {

@@ -205,7 +205,7 @@ The next cycle. This is what makes it a group product rather than a shared note.
 
 | # | Change | Notes |
 |---|---|---|
-| 12 | Let members say yes before the decision, not after | An *I'm in* toggle on proposals with a face pile and a count on the day row |
+| 12 | Let members say yes before the decision, not after | **Shipped.** Same `item_rsvps` record throughout, voided on a rival when something is locked as required |
 | 13 | Run conflict analysis on proposals and surface it in PlaySpace | The engine exists; the copy already claims the feature |
 | 14 | Make the conflict alert actionable | Link both titles, mark the offending rows, add a direct path to fix the time |
 | 15 | Say what the lock preview actually checked | "No conflicts for the 1 person who has RSVP'd" beats a confident "none for anyone" that is not true |
@@ -242,6 +242,31 @@ announcing that the two Saturday options cannot both happen. The real work is a
 second, quieter finding type ("these two cannot both happen") distinct from
 "your day is broken." A change that pattern-matches on the filter will pass unit
 tests and be unusable.
+
+### What 12 ended up doing
+
+The decision was that a pre-lock "I'm in" is the **same object** as a post-lock
+RSVP, voided if an alternative gets locked as mandatory. So:
+
+- `item_rsvps` is unchanged. `checkRsvp` now allows any group item that isn't
+  declined and isn't locked-as-required, instead of locked-optional only.
+- `attendanceFor` reports on proposals, which is what lets PlaySpace show a
+  planner who wants something before they choose what to lock.
+- Locking as **required** deletes the RSVPs on every still-open group item
+  whose window overlaps it. Nobody can attend both, so that support is an
+  answer to a settled question.
+- Scoped to items that are not yet locked, on purpose. A locked *optional* item
+  overlapping a newly-required one is a planner problem the lock preview and
+  conflict banner already surface; silently dropping answers to something
+  already agreed would hide it instead.
+- Unlocking no longer wipes RSVPs. It used to, on the reasoning that an answer
+  to a locked plan means nothing once it's a proposal again — which stops being
+  true when it's the same record on both sides. Unlocking is precisely when a
+  planner most needs to know who wanted the thing.
+
+`windowsOverlap` / `occupiedWindow` moved into conflicts.ts as exported pure
+functions (half-open, missing end treated as `DEFAULT_DURATION_MINUTES`) so the
+void rule and timeline analysis agree on what "these two collide" means.
 
 ### Why 12 is coupled to 13
 

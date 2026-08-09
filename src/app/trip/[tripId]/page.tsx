@@ -117,6 +117,20 @@ export default async function TripPage({
   // agreed are visible in PlaySpace, not just in Agreed.
   const inPlay = shared.filter((i) => i.status !== "declined");
   const inPlayByDay = groupByDay(inPlay);
+  // How many people have said "I'm in" on each thing still in play. Batched
+  // once here rather than per row -- the point of rsvpsForItems. Required
+  // items are excluded: everyone is on those by definition, so a count would
+  // be noise rather than a signal about what the group actually wants.
+  const inPlayRsvps = await rsvpsForItems(inPlay.map((i) => i.id));
+  const supportCounts = new Map(
+    inPlayRsvps.map(({ itemId, responses }) => [
+      itemId,
+      [...responses.values()].filter((r) => r === "yes").length,
+    ]),
+  );
+  for (const item of inPlay) {
+    if (item.commitment === "required") supportCounts.delete(item.id);
+  }
   const playspaceIdeas = inPlay.filter((i) => !i.dayId);
   const playspaceDeclined = shared.filter((i) => i.status === "declined");
 
@@ -369,13 +383,19 @@ export default async function TripPage({
             days={days}
             itemsByDay={inPlayByDay}
             timezone={access.trip.timezone}
+            supportCounts={supportCounts}
           />
 
           <Section title="Ideas" subtitle="Shared, but not on a day yet">
             {playspaceIdeas.length === 0 ? (
               <Empty text="No ideas yet." />
             ) : (
-              <ItemList tripId={tripId} items={playspaceIdeas} timezone={access.trip.timezone} />
+              <ItemList
+                tripId={tripId}
+                items={playspaceIdeas}
+                timezone={access.trip.timezone}
+                supportCounts={supportCounts}
+              />
             )}
           </Section>
 

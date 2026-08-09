@@ -115,22 +115,27 @@ test("restore: only a declined item can be restored", () => {
   assert.equal(checkRestore(idea, author).ok, false);
 });
 
-test("rsvp: only valid on locked, optional, group items", () => {
-  assert.equal(checkRsvp(idea).ok, false, "not locked");
+test("rsvp: the same answer counts before and after a lock", () => {
+  // The whole point of moving RSVPs earlier: a planner can see who wants
+  // something while it's still a proposal, not only once it's settled.
+  assert.deepEqual(checkRsvp(idea), { ok: true }, "an idea can be backed");
 
-  const requiredLocked: LifecycleItem = { ...idea, status: "locked", commitment: "required" };
-  assert.equal(checkRsvp(requiredLocked).ok, false, "required items don't take RSVPs");
-
-  const privateLocked: LifecycleItem = {
-    ...idea,
-    status: "locked",
-    visibility: "private",
-    commitment: null,
-  };
-  assert.equal(checkRsvp(privateLocked).ok, false, "private items don't take RSVPs");
+  const proposed: LifecycleItem = { ...idea, status: "proposed", startsAt: new Date() };
+  assert.deepEqual(checkRsvp(proposed), { ok: true }, "so can a proposal");
 
   const optionalLocked: LifecycleItem = { ...idea, status: "locked", commitment: "optional" };
-  assert.deepEqual(checkRsvp(optionalLocked), { ok: true });
+  assert.deepEqual(checkRsvp(optionalLocked), { ok: true }, "and it survives locking");
+});
+
+test("rsvp: meaningless on required, private, or declined items", () => {
+  const requiredLocked: LifecycleItem = { ...idea, status: "locked", commitment: "required" };
+  assert.equal(checkRsvp(requiredLocked).ok, false, "required puts everyone on the bus already");
+
+  const privateIdea: LifecycleItem = { ...idea, visibility: "private" };
+  assert.equal(checkRsvp(privateIdea).ok, false, "a private item is one person's business");
+
+  const declined: LifecycleItem = { ...idea, status: "declined" };
+  assert.equal(checkRsvp(declined).ok, false, "restore it first");
 });
 
 test("share: author-only, must not already be group, and must not be locked", () => {

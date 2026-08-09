@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeTimeline, type ScheduleItem } from "./conflicts.ts";
+import { analyzeTimeline, windowsOverlap, type ScheduleItem } from "./conflicts.ts";
 import type { TravelEstimate, TravelMode, TravelTimeProvider } from "./travel.ts";
 
 /** Deterministic stand-in: fixed minutes/overhead regardless of coordinates. */
@@ -145,4 +145,25 @@ test("timeline is analyzed in chronological order regardless of input order", as
   const [finding] = await analyzeTimeline(timeline, new FixedTravelTimeProvider(5));
   assert.equal(finding.before.id, "early");
   assert.equal(finding.after.id, "late");
+});
+
+test("windowsOverlap treats a missing end as the default duration", () => {
+  const at = (h: number, m = 0) => new Date(Date.UTC(2026, 9, 11, h, m));
+  // 9:00 with no end occupies 9:00-10:00.
+  assert.equal(windowsOverlap({ startsAt: at(9), endsAt: null }, { startsAt: at(9, 30), endsAt: at(11) }), true);
+  assert.equal(windowsOverlap({ startsAt: at(9), endsAt: null }, { startsAt: at(10), endsAt: at(11) }), false);
+});
+
+test("windowsOverlap is half-open, so touching items don't collide", () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 9, 11, h));
+  assert.equal(windowsOverlap({ startsAt: at(9), endsAt: at(12) }, { startsAt: at(12), endsAt: at(14) }), false);
+  assert.equal(windowsOverlap({ startsAt: at(9), endsAt: at(12) }, { startsAt: at(11), endsAt: at(14) }), true);
+});
+
+test("windowsOverlap catches full containment either way round", () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 9, 11, h));
+  const outer = { startsAt: at(9), endsAt: at(18) };
+  const inner = { startsAt: at(12), endsAt: at(13) };
+  assert.equal(windowsOverlap(outer, inner), true);
+  assert.equal(windowsOverlap(inner, outer), true);
 });

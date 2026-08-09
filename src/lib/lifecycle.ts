@@ -89,10 +89,24 @@ export function checkRestore(item: LifecycleItem, actor: Actor): Check {
   return ok;
 }
 
-/** RSVPs are only meaningful on locked, optional, group items. */
+/**
+ * Saying "I'm in" is one answer about one item, and it means the same thing
+ * whether the item is still a proposal or already locked -- so it's the same
+ * record throughout, not a pre-lock vote that gets converted into an RSVP.
+ *
+ * That's what lets a planner see who actually wants something *before*
+ * choosing what to lock, which is the whole point of PlaySpace. It used to be
+ * locked-only, so during the phase where a group is meant to converge nobody
+ * could express a preference at all.
+ *
+ * Still meaningless in two cases: a private item is one person's business, and
+ * a required item puts everyone on the bus by definition (see attendanceFor).
+ * Answers on a declined item are left alone rather than refused -- restoring
+ * it should bring its support back with it.
+ */
 export function checkRsvp(item: LifecycleItem): Check {
-  if (item.status !== "locked") return no("You can only RSVP to locked items.");
   if (item.visibility === "private") return no("Private items have no RSVPs.");
+  if (item.status === "declined") return no("Restore this before saying you're in.");
   if (item.commitment === "required")
     return no("Required items are automatic — no RSVP needed.");
   return ok;

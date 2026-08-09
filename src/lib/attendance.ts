@@ -18,6 +18,11 @@ export type Attendance = {
  *
  * A private item belongs to one person, so it is attended by exactly its author
  * regardless of commitment.
+ *
+ * Proposals report attendance too, not just locked items. An "I'm in" is one
+ * answer about one item and means the same thing on either side of a lock (see
+ * lifecycle.ts's checkRsvp), so this is what lets PlaySpace show a planner who
+ * actually wants something before they choose what to lock.
  */
 export async function attendanceFor(
   access: TripAccess,
@@ -30,7 +35,9 @@ export async function attendanceFor(
     return { ...none, attendees: author ? [author] : [], automatic: true };
   }
 
-  if (item.status !== "locked") return none;
+  // Declined items keep their rows (see checkRsvp) but report nobody -- the
+  // support is remembered for a restore, not counted while it's off the table.
+  if (item.status === "declined") return none;
 
   if (item.commitment === "required") {
     return { ...none, attendees: access.members, automatic: true };

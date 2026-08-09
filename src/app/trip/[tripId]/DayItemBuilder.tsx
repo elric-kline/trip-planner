@@ -28,11 +28,13 @@ export default function DayItemBuilder({
   dayId,
   items,
   timezone,
+  supportCounts,
 }: {
   tripId: string;
   dayId: string;
   items: Item[];
   timezone: string;
+  supportCounts?: Map<string, number>;
 }) {
   return (
     <div>
@@ -40,7 +42,12 @@ export default function DayItemBuilder({
         <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
           {items.map((item, i) => (
             <li key={item.id}>
-              <ItemRow tripId={tripId} item={item} timezone={timezone} />
+              <ItemRow
+                tripId={tripId}
+                item={item}
+                timezone={timezone}
+                supportCount={supportCounts?.get(item.id)}
+              />
               {i < items.length - 1 && (
                 <div className="flex justify-center border-t border-dashed border-stone-200">
                   <AddItemSheet

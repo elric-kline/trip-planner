@@ -93,7 +93,9 @@ export default async function ItemPage({
   const { edit, error } = await searchParams;
 
   const attendance = await attendanceFor(access, item);
-  const myResponse = item.status === "locked" && item.commitment === "optional" ? await myRsvp(access, itemId) : null;
+  // Asked for whenever an answer is possible at all, not just once locked --
+  // the button has to show which way the viewer already leaned on a proposal.
+  const myResponse = checkRsvp(item).ok ? await myRsvp(access, itemId) : null;
   const editable = canEditItem(access, item);
   const lodging = item.category === "lodging" ? await getLodgingDetails(itemId) : null;
   const dining = item.category === "dining" ? await getDiningDetails(itemId) : null;
@@ -586,11 +588,9 @@ export default async function ItemPage({
             </Panel>
           )}
 
-          {item.status === "locked" && (
-            <Panel title={`Who's ${item.commitment === "required" ? "on this" : "in"}`}>
-              {item.visibility === "private" ? (
-                <p className="text-sm text-stone-500">Just you.</p>
-              ) : item.commitment === "required" ? (
+          {item.visibility === "group" && item.status !== "declined" && (
+            <Panel title={item.commitment === "required" ? "Who's on this" : "Who's in"}>
+              {item.commitment === "required" ? (
                 <p className="text-sm text-stone-500">Everyone on the trip — this is required.</p>
               ) : (
                 <div className="space-y-1 text-sm">
@@ -609,15 +609,23 @@ export default async function ItemPage({
               )}
 
               {rsvpAllowed && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(["yes", "maybe", "no"] as const).map((r) => (
-                    <form key={r} action={setRsvpAction.bind(null, tripId, itemId, r)}>
-                      <button className={myResponse === r ? "btn-primary" : "btn-secondary"}>
-                        {r === "yes" ? "I'm in" : r === "maybe" ? "Maybe" : "Can't make it"}
-                      </button>
-                    </form>
-                  ))}
-                </div>
+                <>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(["yes", "maybe", "no"] as const).map((r) => (
+                      <form key={r} action={setRsvpAction.bind(null, tripId, itemId, r)}>
+                        <button className={myResponse === r ? "btn-primary" : "btn-secondary"}>
+                          {r === "yes" ? "I'm in" : r === "maybe" ? "Maybe" : "Can't make it"}
+                        </button>
+                      </form>
+                    ))}
+                  </div>
+                  {item.status !== "locked" && (
+                    <p className="mt-2 text-sm text-stone-500">
+                      Nothing&apos;s settled yet — this tells the planner who wants it. Your answer carries over if it
+                      gets locked in.
+                    </p>
+                  )}
+                </>
               )}
             </Panel>
           )}
@@ -663,7 +671,9 @@ export default async function ItemPage({
             )}
             {deleteAllowed && (
               <form action={deleteItemAction.bind(null, tripId, itemId)}>
-                <button className="inline-flex min-h-11 items-center text-sm text-red-600 underline">Delete</button>
+                <button className="-mx-2 inline-flex min-h-11 items-center px-2 text-sm text-red-600 underline">
+                  Delete
+                </button>
               </form>
             )}
           </section>

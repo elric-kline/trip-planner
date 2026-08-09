@@ -1,4 +1,4 @@
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   diningDetails,
@@ -25,6 +25,7 @@ import {
 import { canEditItem, getItem, type Item, type TripAccess } from "./scope.ts";
 import { getDay, getDayByDate } from "./days.ts";
 import { calendarDateInZone } from "./time.ts";
+import { windowsOverlap } from "./conflicts.ts";
 
 export class RuleError extends Error {}
 
@@ -320,6 +321,52 @@ export async function unscheduleItem(access: TripAccess, itemId: string): Promis
   return updated;
 }
 
+/**
+ * Locking something as *required* puts the whole group on that slot, so every
+ * still-open proposal overlapping it has lost -- nobody can attend both. Their
+ * "I'm in" answers are answers to a question that's now settled, so they're
+ * voided rather than left to imply support for something unattendable.
+ *
+ * Scoped to items that haven't been locked yet, on purpose. A locked *optional*
+ * item that overlaps a newly-required one is a planner problem, not an RSVP
+ * problem -- the lock preview and the trip page's conflict banner are what
+ * surface that, and silently dropping people's answers to something already
+ * agreed would hide it instead.
+ *
+ * Returns the ids it cleared so callers can say what happened.
+ */
+async function voidRsvpsDisplacedBy(locked: Item): Promise<string[]> {
+  if (!locked.startsAt) return [];
+
+  const rivals = await db
+    .select()
+    .from(items)
+    .where(
+      and(
+        eq(items.tripId, locked.tripId),
+        eq(items.visibility, "group"),
+        ne(items.id, locked.id),
+        ne(items.status, "locked"),
+        ne(items.status, "declined"),
+        isNotNull(items.startsAt),
+      ),
+    );
+
+  const displaced = rivals
+    .filter((rival) =>
+      windowsOverlap(
+        { startsAt: locked.startsAt!, endsAt: locked.endsAt },
+        { startsAt: rival.startsAt!, endsAt: rival.endsAt },
+      ),
+    )
+    .map((rival) => rival.id);
+
+  if (displaced.length > 0) {
+    await db.delete(itemRsvps).where(inArray(itemRsvps.itemId, displaced));
+  }
+  return displaced;
+}
+
 export async function lockItem(
   access: TripAccess,
   itemId: string,
@@ -340,6 +387,10 @@ export async function lockItem(
     .where(eq(items.id, itemId))
     .returning();
 
+  if (commitment === "required") {
+    await voidRsvpsDisplacedBy(updated);
+  }
+
   return updated;
 }
 
@@ -347,9 +398,11 @@ export async function unlockItem(access: TripAccess, itemId: string): Promise<It
   const item = await getItem(access, itemId);
   enforce(checkUnlock(item, actorFor(access, item)));
 
-  // RSVPs are answers to a specific locked plan. If it goes back to being a
-  // proposal, those answers no longer mean anything.
-  await db.delete(itemRsvps).where(eq(itemRsvps.itemId, itemId));
+  // RSVPs deliberately survive an unlock. They used to be wiped here, on the
+  // reasoning that an answer to a locked plan means nothing once it's a
+  // proposal again -- but an "I'm in" is now one answer about one item, valid
+  // on either side of a lock (see lifecycle.ts's checkRsvp). Unlocking is
+  // exactly the moment a planner most needs to know who wanted the thing.
 
   const [updated] = await db
     .update(items)
