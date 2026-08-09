@@ -102,14 +102,30 @@ test("updatePassportPhoto/getPassportPhoto/getPassportPhotoDataUri round-trip a 
   assert.equal((await getPassportDetails(user.id))?.fullName, "Jane Q. Traveler", "removing the photo doesn't touch the text fields");
 });
 
-test("updatePassportPhoto rejects an oversized file and a disallowed content type", async (t) => {
+test("updatePassportPhoto rejects an oversized file, a non-image content type, and an SVG specifically", async (t) => {
   withEncryption(t);
   const user = await createTestUser();
   t.after(() => deleteTestUser(user.id));
 
   await assert.rejects(() => updatePassportPhoto(user, Buffer.alloc(9 * 1024 * 1024), "image/jpeg"), RuleError);
   await assert.rejects(() => updatePassportPhoto(user, Buffer.from([1, 2, 3]), "application/pdf"), RuleError);
+  await assert.rejects(() => updatePassportPhoto(user, Buffer.from([1, 2, 3]), "image/svg+xml"), RuleError);
   await assert.rejects(() => updatePassportPhoto(user, Buffer.alloc(0), "image/jpeg"), RuleError);
+});
+
+test("updatePassportPhoto accepts any real image content type, not just a fixed shortlist -- phone camera uploads report a lot of variety here", async (t) => {
+  withEncryption(t);
+  const user = await createTestUser();
+  t.after(() => deleteTestUser(user.id));
+
+  // iOS alone reports HEIC photos as either of these depending on version;
+  // image/tiff and image/bmp cover less common but still legitimate
+  // photo-library exports. None of these were in the old fixed Set.
+  for (const mimeType of ["image/heic", "image/heif", "image/tiff", "image/bmp", "image/gif"]) {
+    await updatePassportPhoto(user, Buffer.from([1, 2, 3]), mimeType);
+    const photo = await getPassportPhoto(user.id);
+    assert.equal(photo?.mimeType, mimeType, `${mimeType} should be accepted`);
+  }
 });
 
 test("removePassportDetails clears every field, including the photo", async (t) => {

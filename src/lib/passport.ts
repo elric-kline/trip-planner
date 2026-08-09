@@ -8,7 +8,29 @@ import type { TripAccess } from "./scope.ts";
 export class RuleError extends Error {}
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // 8 MB -- generous for a passport photo page scan, cheap enough to store as encrypted text (see schema.ts)
-const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
+
+/**
+ * Any real raster image type, not a hardcoded allowlist -- a phone
+ * camera's own photo library is exactly the input this field is built
+ * for, and what the browser reports for that varies a lot more than a
+ * short list of "the common ones" ever accounted for: iOS alone reports
+ * HEIC photos as `image/heic`, `image/heif`, sometimes both depending on
+ * iOS/Safari version, and older or content-managed images can arrive as
+ * `image/heic-sequence`, `image/tiff`, `image/bmp`, `image/gif`, or
+ * (converted server-side by some photo pickers) `image/jpg` -- a
+ * three-item Set silently rejected most of these with no way for someone
+ * on their phone to tell why.
+ *
+ * `image/svg+xml` is the one deliberate exclusion: an SVG can carry
+ * embedded script, and while rendering it via `<img src>` already
+ * suppresses script execution in every current browser (see
+ * getPassportPhotoDataUri's own doc comment for where this gets
+ * rendered), there's no legitimate reason a passport photo would ever be
+ * an SVG in the first place -- excluding it costs nothing real.
+ */
+function isAcceptablePhotoType(mimeType: string): boolean {
+  return mimeType.startsWith("image/") && mimeType !== "image/svg+xml";
+}
 
 export type PassportInput = {
   fullName?: string | null;
@@ -173,8 +195,8 @@ export async function updatePassportPhoto(viewer: CurrentUser, bytes: Buffer, mi
   requireConfigured();
   if (bytes.length === 0) throw new RuleError("That file looks empty.");
   if (bytes.length > MAX_PHOTO_BYTES) throw new RuleError("That photo is too large -- 8 MB max.");
-  if (!ALLOWED_PHOTO_TYPES.has(mimeType)) {
-    throw new RuleError("Photos must be JPEG, PNG, WebP, or HEIC.");
+  if (!isAcceptablePhotoType(mimeType)) {
+    throw new RuleError(`That doesn't look like a photo (got "${mimeType || "an unrecognized file type"}").`);
   }
 
   await db
