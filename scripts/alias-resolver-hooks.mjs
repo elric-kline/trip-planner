@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -12,12 +12,24 @@ import { fileURLToPath } from "node:url";
  * resolver gap. Registered by register-alias-resolver.mjs via
  * module.register(), which is what `npm test` passes to `node --import`.
  *
- * Alias imports in this codebase are always extensionless and point either
- * at a file ("@/lib/dietary" -> src/lib/dietary.ts) or, for exactly one
- * case, a directory with an index ("@/db" -> src/db/index.ts) -- so this
- * only needs to try those two shapes, not a general resolution algorithm.
+ * Alias imports here come in three shapes and all of them are in active use:
+ * extensionless pointing at a file ("@/lib/dietary" -> src/lib/dietary.ts),
+ * extensionless pointing at a directory index ("@/db" -> src/db/index.ts),
+ * and -- the dominant style under src/app -- written with the extension
+ * already on ("@/lib/auth.ts"). The third used to fall through to
+ * "src/lib/auth.ts/index.ts" and fail, which stayed hidden only because
+ * nothing `node --test` loaded had ever imported that way. It does now, so
+ * the candidates are tried in order rather than assumed.
  */
 const SRC_ROOT = new URL("../src/", import.meta.url);
+
+function isFile(url) {
+  try {
+    return statSync(fileURLToPath(url)).isFile();
+  } catch {
+    return false;
+  }
+}
 
 // Test-only substitutions for framework APIs plain `node --test` can't
 // reach on its own. See fake-next-headers.mjs for why and its limits.
@@ -31,9 +43,14 @@ export async function resolve(specifier, context, nextResolve) {
   }
   if (specifier.startsWith("@/")) {
     const rel = specifier.slice(2);
-    const asFile = new URL(`${rel}.ts`, SRC_ROOT);
-    const asIndex = new URL(`${rel}/index.ts`, SRC_ROOT);
-    const target = existsSync(fileURLToPath(asFile)) ? asFile : asIndex;
+    const candidates = [rel, `${rel}.ts`, `${rel}.tsx`, `${rel}/index.ts`].map(
+      (path) => new URL(path, SRC_ROOT),
+    );
+    // isFile(), not exists(): "@/db" names a real *directory*, and resolving
+    // an ES import to a directory is an error rather than an index lookup.
+    // Last candidate is the fallback, so a genuinely missing module produces
+    // Node's own "cannot find module" naming a real path.
+    const target = candidates.find(isFile) ?? candidates.at(-1);
     return nextResolve(target.href, context);
   }
   return nextResolve(specifier, context);
