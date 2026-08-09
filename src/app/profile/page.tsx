@@ -134,7 +134,7 @@ export default async function ProfilePage({
                 <span className="mb-1 block text-stone-700">
                   {photoDataUri ? "Replace photo (optional)" : "Photo of the passport page (optional)"}
                 </span>
-                <input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/heic" className="input" />
+                <input type="file" name="photo" accept="image/*" className="input" />
               </label>
 
               <button type="submit" className="btn-primary justify-self-start">
