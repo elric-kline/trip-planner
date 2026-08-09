@@ -120,12 +120,23 @@ function toScheduleItem(item: Item, windows: Map<string, TransportWindow>): Sche
 }
 
 /**
- * Every locked, timed, group item — the raw material for everyone's
- * timelines. Fetched once and reused per member so a trip-wide check doesn't
- * requery per person.
+ * Every timed group item that could be on somebody's schedule — proposals as
+ * well as locked plans. Fetched once and reused per member so a trip-wide
+ * check doesn't requery per person.
+ *
+ * Proposals belong here because an "I'm in" now means the same thing before
+ * and after a lock (see lifecycle.ts's checkRsvp). That's what makes including
+ * them safe: groupTimelineFor still only picks up what a given member actually
+ * said yes to, so two competing options nobody has endorsed never land on the
+ * same timeline and can't manufacture a conflict between themselves. Only when
+ * one person has backed both does it become a real "you can't do both" -- which
+ * is exactly when they want to hear about it, rather than after it's locked.
+ *
+ * Ideas are excluded for free: an item with no time isn't schedulable, and
+ * statusForTime never leaves a timed item on "idea".
  */
-async function lockedGroupItems(access: TripAccess): Promise<Item[]> {
-  const items = await listItems(access, { status: "locked" });
+async function timelineGroupItems(access: TripAccess): Promise<Item[]> {
+  const items = await listItems(access, { status: ["proposed", "locked"] });
   return items.filter((i) => i.visibility === "group" && i.startsAt);
 }
 
@@ -154,17 +165,24 @@ export async function groupTimelineFor(
 }
 
 /**
- * The viewer's own full timeline: every group item they're attending, plus
- * their own private locked items. `listItems` already scopes private items to
- * their author, so this is the one place private plans legitimately enter
- * conflict math — and only for the person they belong to.
+ * The viewer's own full timeline: every group item they're attending -- backed
+ * proposals included, not just locked plans -- plus their own private locked
+ * items. `listItems` already scopes private items to their author, so this is
+ * the one place private plans legitimately enter conflict math, and only for
+ * the person they belong to.
+ *
+ * Private items stay locked-only on purpose. A group item carries an explicit
+ * "I'm in"; a private one can't be RSVP'd at all (checkRsvp refuses), so
+ * locking it into your own plan is the equivalent statement of intent. A
+ * private idea you're still mulling over is not a commitment and shouldn't
+ * start colliding with things.
  */
 export async function conflictsForViewer(
   access: TripAccess,
   travelProvider: TravelTimeProvider = new HaversineTravelTimeProvider(),
   flightStatusProvider: FlightStatusProvider = new NoopFlightStatusProvider(),
 ): Promise<ScheduleFinding[]> {
-  const items = await listItems(access, { status: "locked" });
+  const items = await listItems(access, { status: ["proposed", "locked"] });
   const timedItems = items.filter((i) => i.startsAt);
 
   const groupItems = timedItems.filter((i) => i.visibility === "group");
@@ -172,7 +190,9 @@ export async function conflictsForViewer(
   const rsvpMap = new Map(rsvps.map((r) => [r.itemId, r.responses]));
 
   const attending = timedItems.filter((item) => {
-    if (item.visibility === "private") return true; // already scoped to the viewer
+    // Already scoped to the viewer by listItems -- see the note above on why
+    // a private item has to be locked to count.
+    if (item.visibility === "private") return item.status === "locked";
     if (item.commitment === "required") return true;
     return rsvpMap.get(item.id)?.get(access.viewer.id) === "yes";
   });
@@ -201,8 +221,11 @@ export async function previewLockImpact(
 ): Promise<LockImpact[]> {
   if (!candidate.startsAt || candidate.visibility !== "group") return [];
 
-  const existing = await lockedGroupItems(access);
-  const rsvps = await rsvpsForItems(existing.map((i) => i.id));
+  // The candidate is itself a proposal, so it now comes back in this list --
+  // leaving it in would have it collide with itself and report the lock as its
+  // own new conflict.
+  const existing = (await timelineGroupItems(access)).filter((i) => i.id !== candidate.id);
+  const rsvps = await rsvpsForItems([...existing.map((i) => i.id), candidate.id]);
   const rsvpMap = new Map(rsvps.map((r) => [r.itemId, r.responses]));
 
   // Computed once, up front -- every affected member's groupTimelineFor call

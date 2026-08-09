@@ -33,6 +33,7 @@ export default function PlaySpaceDayCard({
   items,
   timezone,
   supportCounts,
+  conflictedItemIds,
 }: {
   tripId: string;
   day: TripDay;
@@ -40,6 +41,7 @@ export default function PlaySpaceDayCard({
   items: Item[];
   timezone: string;
   supportCounts?: Map<string, number>;
+  conflictedItemIds?: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -72,6 +74,7 @@ export default function PlaySpaceDayCard({
             items={items}
             timezone={timezone}
             supportCounts={supportCounts}
+            conflictedItemIds={conflictedItemIds}
           />
         </div>
       )}

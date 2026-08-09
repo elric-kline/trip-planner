@@ -39,6 +39,7 @@ export function ItemRow({
   timezone,
   hideStatus = false,
   supportCount,
+  conflicted = false,
 }: {
   tripId: string;
   item: Item;
@@ -56,6 +57,12 @@ export function ItemRow({
    * Omitted in Agreed, where the decision has already been made.
    */
   supportCount?: number;
+  /**
+   * This row is one half of a flagged clash on the viewer's own schedule. The
+   * banner above used to name two items while every row below looked
+   * identical, so the warning and the things it was about never met.
+   */
+  conflicted?: boolean;
 }) {
   return (
     <a
@@ -64,6 +71,11 @@ export function ItemRow({
     >
       <div>
         <div className="font-medium">
+          {conflicted && (
+            <span className="mr-1.5 text-amber-600" title="Clashes with something else you're in for">
+              ⚠
+            </span>
+          )}
           {item.title}
           {item.visibility === "private" && (
             <span className="badge ml-2 bg-purple-100 text-purple-700">Private</span>
@@ -94,12 +106,14 @@ export function ItemList({
   timezone,
   hideStatus = false,
   supportCounts,
+  conflictedItemIds,
 }: {
   tripId: string;
   items: Item[];
   timezone: string;
   hideStatus?: boolean;
   supportCounts?: Map<string, number>;
+  conflictedItemIds?: Set<string>;
 }) {
   return (
     <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
@@ -111,6 +125,7 @@ export function ItemList({
             timezone={timezone}
             hideStatus={hideStatus}
             supportCount={supportCounts?.get(item.id)}
+            conflicted={conflictedItemIds?.has(item.id)}
           />
         </li>
       ))}

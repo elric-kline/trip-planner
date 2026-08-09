@@ -193,6 +193,7 @@ export default function DayCard({
   timezone,
   members,
   viewerId,
+  conflictedItemIds,
 }: {
   tripId: string;
   day: TripDay;
@@ -203,6 +204,7 @@ export default function DayCard({
   timezone: string;
   members: TripMemberSummary[];
   viewerId: string;
+  conflictedItemIds?: Set<string>;
 }) {
   const [itemsOpen, setItemsOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -266,7 +268,13 @@ export default function DayCard({
           {items.length === 0 ? (
             <p className="text-sm text-stone-400">Nothing locked in for this day yet.</p>
           ) : (
-            <ItemList tripId={tripId} items={items} timezone={timezone} hideStatus />
+            <ItemList
+              tripId={tripId}
+              items={items}
+              timezone={timezone}
+              hideStatus
+              conflictedItemIds={conflictedItemIds}
+            />
           )}
           <button
             type="button"
