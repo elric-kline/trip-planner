@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { getCurrentUser, signOut } from "@/lib/auth.ts";
 import { Logo } from "@/components/logo.tsx";
+import { displayName } from "@/lib/display-name.ts";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 const spaceGrotesk = Space_Grotesk({
@@ -17,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s · AgreeMobile",
   },
   description:
-    "Align on where you're going and what you're doing, then keep the trip as a shared journal.",
+    "Align on where you're going and what you're doing, and see who's actually in before anything gets locked.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -41,9 +42,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   href="/profile"
                   className="inline-flex min-h-11 min-w-0 items-center truncate text-stone-500 underline hover:text-route-700"
                 >
-                  {user.email}
+                  {displayName(user)}
                 </a>
+                {/* shrink-0 on the form, not just the button inside it: the
+                    form is the flex item, so without it a long name squeezes
+                    this column and "Sign out" wraps to two lines. */}
                 <form
+                  className="shrink-0"
                   action={async () => {
                     "use server";
                     await signOut();

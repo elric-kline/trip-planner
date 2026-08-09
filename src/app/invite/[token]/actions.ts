@@ -23,5 +23,11 @@ export async function acceptInviteAction(token: string): Promise<void> {
   // the same kind on the same day) they aren't part of yet. Most trips
   // never have one, so this is the common-case straight-to-trip path.
   const branches = await unresolvedBranchesForMember(tripId, user.id);
-  redirect(branches.length > 0 ? `/trip/${tripId}/join` : `/trip/${tripId}`);
+  if (branches.length > 0) redirect(`/trip/${tripId}/join`);
+
+  // Ask for a name only from somebody who hasn't set one -- the welcome page
+  // sends them straight on if they have, so this can't become a step regulars
+  // learn to dismiss. It's the one moment where the reason for giving a name
+  // is obvious: they're about to show up on everyone else's screen.
+  redirect(user.name?.trim() ? `/trip/${tripId}` : `/trip/${tripId}/welcome`);
 }

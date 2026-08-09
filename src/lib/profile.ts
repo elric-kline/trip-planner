@@ -56,9 +56,9 @@ export async function updateProfile(
     .update(users)
     .set({
       // Name is optional -- nothing else in the app requires one (every
-      // display falls back to email, e.g. TripMemberSummary usage), and
-      // magic-link signup never asks for one either. A blank submission
-      // just clears it, same as any other optional text field here.
+      // display falls back through displayName to a readable form of the
+      // address), and magic-link signup never asks for one either. A blank
+      // submission just clears it, same as any other optional text field here.
       ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
       ...(input.dietaryRestrictions !== undefined
         ? { dietaryRestrictions: input.dietaryRestrictions.length ? input.dietaryRestrictions : null }

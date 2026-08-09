@@ -11,6 +11,7 @@ import { RuleError, createItem, lockItem, scheduleItem, setRsvp } from "./items.
 import { listItems, requireTripAccess } from "./scope.ts";
 import { addLocation, listDays, setLocationMembers } from "./days.ts";
 import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./test-fixtures.ts";
+import { displayName } from "./display-name.ts";
 
 function clearEnv() {
   delete process.env.ANTHROPIC_API_KEY;
@@ -54,8 +55,12 @@ function toolUseResponse(calls: { id: string; name: string; input: Record<string
 }
 
 async function setupTrip() {
-  const planner = await createTestUser();
-  const memberA = await createTestUser();
+  // Named, unlike most fixtures here: several of these tests assert on how the
+  // system prompt refers to people, and a nameless user only exercises
+  // displayName's fallback (which display-name.test.ts covers directly). Real
+  // names are what the prompt carries in production.
+  const planner = await createTestUser({ name: "Ana Planner" });
+  const memberA = await createTestUser({ name: "Bern Member" });
   const trip = await createTestTrip(planner);
   await addTripMember(trip.id, memberA.id, "participant");
   const plannerAccess = await requireTripAccess(trip.id, planner);
@@ -198,8 +203,8 @@ test("the system prompt reflects the locked plan, including who's attending an o
 
   assert.match(systemPrompt, /Flight to Testville/);
   assert.match(systemPrompt, /required — everyone attending/);
-  assert.match(systemPrompt, new RegExp(`City tour.*attending: ${memberA.name ?? memberA.email}`));
-  assert.doesNotMatch(systemPrompt, new RegExp(`attending: [^\\n]*${planner.name ?? planner.email}`));
+  assert.match(systemPrompt, new RegExp(`City tour.*attending: ${displayName(memberA)}`));
+  assert.doesNotMatch(systemPrompt, new RegExp(`attending: [^\\n]*${displayName(planner)}`));
 });
 
 test("the system prompt reflects the day-by-day wake/stop/sleep locations, including a split day's per-person legs, not just the trip's overall destination", async (t) => {
@@ -243,7 +248,7 @@ test("the system prompt reflects the day-by-day wake/stop/sleep locations, inclu
   // Same context from the other member's own thread, resolved to *their* name in the split.
   systemPrompt = "";
   await sendAssistantMessage(memberAAccess, "where do I wake up on day 2?");
-  assert.match(systemPrompt, new RegExp(`Whistler, BC \\(${memberA.name ?? memberA.email}\\)`));
+  assert.match(systemPrompt, new RegExp(`Whistler, BC \\(${displayName(memberA)}\\)`));
 });
 
 test("a pin_idea tool call creates a private Scratchpad idea and is reported back in the pinned list", async (t) => {
