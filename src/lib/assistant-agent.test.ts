@@ -323,9 +323,10 @@ test("a server tool (e.g. web_fetch) that pause_turns more than MAX_ROUNDS times
   // single slow page fetch pause_turning nine times used to exhaust the
   // whole budget and fail with "more back-and-forth" before the model ever
   // got a real decision point. It shouldn't, and now doesn't.
-  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
-    const call = fetchMock.mock.calls.length;
-    if (call < 9) return textResponse(`Still working (${call})...`, "pause_turn");
+  let call = 0;
+  const fetchMock = t.mock.method(globalThis, "fetch", async (): Promise<Response> => {
+    const thisCall = call++;
+    if (thisCall < 9) return textResponse(`Still working (${thisCall})...`, "pause_turn");
     return textResponse("Found the hours: open until 10pm.");
   });
 
