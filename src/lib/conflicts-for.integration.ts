@@ -375,3 +375,143 @@ test("previewLockImpact: locking a required candidate that overlaps an existing 
     assert.ok(impact.newFindings.length > 0);
   }
 });
+
+/**
+ * The reason including proposals is safe at all. Competing options for the
+ * same slot are *supposed* to overlap -- that's what proposing alternatives
+ * means -- so pulling every proposal onto everyone's timeline would turn the
+ * conflict banner into a permanent complaint that the two Saturday ideas can't
+ * both happen. Only a backed proposal lands on a timeline, so an unendorsed
+ * pair stays silent.
+ */
+test("two overlapping proposals nobody has backed are not a conflict for anyone", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Ruins" })).id,
+    new Date("2026-08-01T13:00:00Z"),
+    new Date("2026-08-01T17:00:00Z"),
+  );
+  await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Waterfall" })).id,
+    new Date("2026-08-01T14:00:00Z"),
+    new Date("2026-08-01T18:00:00Z"),
+  );
+
+  assert.deepEqual(flagged(await conflictsForViewer(plannerAccess)), []);
+  assert.deepEqual(flagged(await conflictsForViewer(memberAAccess)), []);
+});
+
+test("backing both halves of an overlapping pair is a conflict, and only for the backer", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const ruins = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Ruins" })).id,
+    new Date("2026-08-02T13:00:00Z"),
+    new Date("2026-08-02T17:00:00Z"),
+  );
+  const waterfall = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Waterfall" })).id,
+    new Date("2026-08-02T14:00:00Z"),
+    new Date("2026-08-02T18:00:00Z"),
+  );
+
+  await setRsvp(memberAAccess, ruins.id, "yes");
+  await setRsvp(memberAAccess, waterfall.id, "yes");
+
+  const forMember = flagged(await conflictsForViewer(memberAAccess));
+  assert.equal(forMember.length, 1, "you said you're in for both -- you can't be");
+  assert.equal(forMember[0].reason, "overlap");
+
+  assert.deepEqual(
+    flagged(await conflictsForViewer(plannerAccess)),
+    [],
+    "somebody else's answers never land on your timeline",
+  );
+});
+
+test("backing only one of an overlapping pair stays quiet", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const ruins = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Ruins" })).id,
+    new Date("2026-08-03T13:00:00Z"),
+    new Date("2026-08-03T17:00:00Z"),
+  );
+  await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Waterfall" })).id,
+    new Date("2026-08-03T14:00:00Z"),
+    new Date("2026-08-03T18:00:00Z"),
+  );
+  await setRsvp(memberAAccess, ruins.id, "yes");
+
+  assert.deepEqual(flagged(await conflictsForViewer(memberAAccess)), []);
+});
+
+test("a backed proposal collides with an already-locked required item", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  await lockedRequired(plannerAccess, "Group briefing", new Date("2026-08-04T14:00:00Z"));
+  const optionalIdea = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Side trip" })).id,
+    new Date("2026-08-04T14:15:00Z"),
+    new Date("2026-08-04T16:00:00Z"),
+  );
+  await setRsvp(memberAAccess, optionalIdea.id, "yes");
+
+  const findings = flagged(await conflictsForViewer(memberAAccess));
+  assert.equal(findings.length, 1, "a required item is on everyone, so backing this clashes");
+});
+
+test("a private idea stays out of conflict maths until it's locked into a plan", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  await lockedRequired(plannerAccess, "Group briefing", new Date("2026-08-05T14:00:00Z"));
+  await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Maybe a museum", visibility: "private" })).id,
+    new Date("2026-08-05T14:30:00Z"),
+    new Date("2026-08-05T16:00:00Z"),
+  );
+
+  assert.deepEqual(
+    flagged(await conflictsForViewer(plannerAccess)),
+    [],
+    "a private item can't be RSVP'd, so locking it is the statement of intent",
+  );
+});
+
+test("previewLockImpact doesn't report the candidate colliding with itself", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess, memberA } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const candidate = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Long tour" })).id,
+    new Date("2026-08-06T09:00:00Z"),
+    new Date("2026-08-06T17:00:00Z"),
+  );
+  // Backed by a member, so it's on their timeline while still a proposal --
+  // which is exactly when it could have been double-counted.
+  await setRsvp(memberAAccess, candidate.id, "yes");
+
+  const impacts = await previewLockImpact(
+    plannerAccess,
+    await getItem(plannerAccess, candidate.id),
+    "required",
+  );
+  const forMember = impacts.find((i) => i.member.userId === memberA.id);
+  assert.equal(forMember, undefined, "nothing else is scheduled, so there is nothing to clash with");
+});

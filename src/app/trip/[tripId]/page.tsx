@@ -138,6 +138,10 @@ export default async function TripPage({
   // -- only the flight-status provider needs picking here.
   const findings = flagged(await conflictsForViewer(access, undefined, defaultFlightStatusProvider()));
   const dietaryFindings = await dietaryWarningsForViewer(access);
+  // Every item named in a flagged finding, so the rows can carry the same mark
+  // the banner does -- it used to announce a clash while the offending rows
+  // looked exactly like the one that was fine.
+  const conflictedItemIds = new Set(findings.flatMap((f) => [f.before.id, f.after.id]));
 
   const days = await listDays(access);
   const locationsByDay = await locationsForDays(days.map((d) => d.id));
@@ -261,17 +265,36 @@ export default async function TripPage({
 
       {findings.length > 0 && (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
-          <p className="mb-2 text-sm font-medium text-amber-900">
+          <p className="mb-1 text-sm font-medium text-amber-900">
             Your schedule has {findings.length} tight or conflicting {findings.length === 1 ? "spot" : "spots"}
           </p>
-          <ul className="space-y-1 text-sm text-amber-800">
+          <p className="mb-2 text-sm text-amber-800">
+            Counting everything you&apos;ve said you&apos;re in for, proposals included.
+          </p>
+          {/* Both titles link to the item. The alert used to name two things
+              and give you no way to reach either, so fixing a clash meant
+              working out which day it was on and hunting for it. */}
+          <ul className="space-y-2 text-sm text-amber-800">
             {findings.map((f, i) => (
               <li key={i}>
-                {f.severity === "conflict" ? "Conflict" : "Tight"}: <strong>{f.before.title}</strong> →{" "}
-                <strong>{f.after.title}</strong> —{" "}
+                {f.severity === "conflict" ? "Conflict" : "Tight"}:{" "}
+                <a href={`/trip/${tripId}/items/${f.before.id}`} className="font-semibold underline">
+                  {f.before.title}
+                </a>{" "}
+                →{" "}
+                <a href={`/trip/${tripId}/items/${f.after.id}`} className="font-semibold underline">
+                  {f.after.title}
+                </a>{" "}
+                —{" "}
                 {f.reason === "overlap"
                   ? "these overlap in time."
-                  : `${Math.round(f.gapMinutes)} min gap, ~${f.travelMinutes} min travel + ${f.overheadMinutes} min overhead.`}
+                  : `${Math.round(f.gapMinutes)} min gap, ~${f.travelMinutes} min travel + ${f.overheadMinutes} min overhead.`}{" "}
+                <a
+                  href={`/trip/${tripId}/items/${f.after.id}?edit=1`}
+                  className="whitespace-nowrap font-semibold underline"
+                >
+                  Change the time →
+                </a>
               </li>
             ))}
           </ul>
@@ -362,10 +385,17 @@ export default async function TripPage({
             timezone={access.trip.timezone}
             members={access.members}
             viewerId={access.viewer.id}
+            conflictedItemIds={conflictedItemIds}
           />
           {lockedOffCalendar.length > 0 && (
             <Section title="Locked, off the calendar" subtitle="Its date falls outside the trip's own span">
-              <ItemList tripId={tripId} items={lockedOffCalendar} timezone={access.trip.timezone} hideStatus />
+              <ItemList
+                tripId={tripId}
+                items={lockedOffCalendar}
+                timezone={access.trip.timezone}
+                hideStatus
+                conflictedItemIds={conflictedItemIds}
+              />
             </Section>
           )}
         </div>
@@ -384,6 +414,7 @@ export default async function TripPage({
             itemsByDay={inPlayByDay}
             timezone={access.trip.timezone}
             supportCounts={supportCounts}
+            conflictedItemIds={conflictedItemIds}
           />
 
           <Section title="Ideas" subtitle="Shared, but not on a day yet">
@@ -395,6 +426,7 @@ export default async function TripPage({
                 items={playspaceIdeas}
                 timezone={access.trip.timezone}
                 supportCounts={supportCounts}
+                conflictedItemIds={conflictedItemIds}
               />
             )}
           </Section>

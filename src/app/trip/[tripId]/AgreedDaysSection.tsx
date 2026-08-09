@@ -25,6 +25,7 @@ export default function AgreedDaysSection({
   timezone,
   members,
   viewerId,
+  conflictedItemIds,
 }: {
   tripId: string;
   days: TripDay[];
@@ -34,6 +35,7 @@ export default function AgreedDaysSection({
   timezone: string;
   members: TripMemberSummary[];
   viewerId: string;
+  conflictedItemIds?: Set<string>;
 }) {
   return (
     <div className="space-y-3">
@@ -48,6 +50,7 @@ export default function AgreedDaysSection({
           timezone={timezone}
           members={members}
           viewerId={viewerId}
+          conflictedItemIds={conflictedItemIds}
         />
       ))}
     </div>

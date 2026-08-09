@@ -16,12 +16,14 @@ export default function PlaySpaceDaysSection({
   itemsByDay,
   timezone,
   supportCounts,
+  conflictedItemIds,
 }: {
   tripId: string;
   days: TripDay[];
   itemsByDay: Map<string, Item[]>;
   timezone: string;
   supportCounts?: Map<string, number>;
+  conflictedItemIds?: Set<string>;
 }) {
   return (
     <div className="space-y-3">
@@ -33,6 +35,7 @@ export default function PlaySpaceDaysSection({
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
           supportCounts={supportCounts}
+          conflictedItemIds={conflictedItemIds}
         />
       ))}
     </div>

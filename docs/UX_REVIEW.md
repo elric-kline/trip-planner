@@ -206,8 +206,8 @@ The next cycle. This is what makes it a group product rather than a shared note.
 | # | Change | Notes |
 |---|---|---|
 | 12 | Let members say yes before the decision, not after | **Shipped.** Same `item_rsvps` record throughout, voided on a rival when something is locked as required |
-| 13 | Run conflict analysis on proposals and surface it in PlaySpace | The engine exists; the copy already claims the feature |
-| 14 | Make the conflict alert actionable | Link both titles, mark the offending rows, add a direct path to fix the time |
+| 13 | Run conflict analysis on proposals and surface it in PlaySpace | **Shipped.** A proposal joins your timeline exactly when you've said you're in, which is what stops competing options colliding with each other |
+| 14 | Make the conflict alert actionable | **Shipped.** Both titles link, a "Change the time" link opens the editor, and the offending rows carry a ⚠ |
 | 15 | Say what the lock preview actually checked | "No conflicts for the 1 person who has RSVP'd" beats a confident "none for anyone" that is not true |
 | 16 | Add a comment thread per item | The cheapest answer to "why is this here?" |
 
@@ -230,7 +230,34 @@ deciding something with consequences elsewhere in the system.
 | 15 | Sonnet | Surface the awaiting-RSVP set; small logic plus wording |
 | 16 | Sonnet | New table, action, component. Well-trodden |
 
-### Why 13 needs judgement
+### What 13 ended up doing
+
+Item 12's decision made this fall out cleanly. `groupTimelineFor` already
+filters non-required items to "did this member say yes?", so widening the
+source set from locked-only to `["proposed", "locked"]` was most of the work.
+
+The spam case is handled by construction rather than by a special rule: two
+competing options nobody has endorsed never land on the same timeline, so they
+cannot manufacture a conflict between themselves. Only when one person has
+backed both does it become "you can't do both" -- which is exactly when they
+want to hear it. Integration tests pin all four combinations.
+
+Two things needed care:
+
+- **Private items stay locked-only.** A group item carries an explicit "I'm
+  in"; a private one can't be RSVP'd at all, so locking it into your own plan
+  is the equivalent statement of intent. A private idea you're still mulling
+  over is not a commitment.
+- **`previewLockImpact` had to exclude the candidate**, which is itself a
+  proposal and therefore now comes back in the "existing" set -- it would have
+  collided with itself and reported the lock as its own new conflict.
+
+`dietaryWarningsForViewer` and `dietaryWarningsForItem` were widened the same
+way. Pre-lock is where that warning is worth something: "that place doesn't do
+gluten-free and two people who want to go need it" is useful while you can
+still choose somewhere else.
+
+### Why 13 needed judgement
 
 `groupTimelineFor` decides whose timeline an item belongs on with
 `commitment === "required" || rsvp === "yes"`. Proposals have neither —

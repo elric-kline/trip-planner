@@ -29,12 +29,14 @@ export default function DayItemBuilder({
   items,
   timezone,
   supportCounts,
+  conflictedItemIds,
 }: {
   tripId: string;
   dayId: string;
   items: Item[];
   timezone: string;
   supportCounts?: Map<string, number>;
+  conflictedItemIds?: Set<string>;
 }) {
   return (
     <div>
@@ -47,6 +49,7 @@ export default function DayItemBuilder({
                 item={item}
                 timezone={timezone}
                 supportCount={supportCounts?.get(item.id)}
+                conflicted={conflictedItemIds?.has(item.id)}
               />
               {i < items.length - 1 && (
                 <div className="flex justify-center border-t border-dashed border-stone-200">
