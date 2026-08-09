@@ -52,7 +52,7 @@ export default function PlaySpaceDayCard({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-start justify-between gap-3 text-left"
+        className="flex min-h-11 w-full items-center justify-between gap-3 text-left"
       >
         <h3 className="text-sm font-semibold text-stone-700">
           <span className="mr-1 inline-block w-3 text-stone-400">{open ? "▾" : "▸"}</span>

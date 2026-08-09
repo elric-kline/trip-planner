@@ -27,13 +27,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
       <body className="min-h-screen">
         <header className="border-b border-stone-200 bg-white">
-          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-            <a href="/trips">
+          {/* py-2 rather than py-3: every child below now carries the 44px
+              minimum touch height itself, so the old vertical padding would
+              only have made the header taller without making anything easier
+              to hit. */}
+          <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-2">
+            <a href="/trips" className="inline-flex min-h-11 items-center">
               <Logo />
             </a>
             {user ? (
-              <div className="flex items-center gap-3 text-sm">
-                <a href="/profile" className="text-stone-500 underline hover:text-route-700">
+              <div className="flex min-w-0 items-center gap-3 text-sm">
+                <a
+                  href="/profile"
+                  className="inline-flex min-h-11 min-w-0 items-center truncate text-stone-500 underline hover:text-route-700"
+                >
                   {user.email}
                 </a>
                 <form
@@ -42,11 +49,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     await signOut();
                   }}
                 >
-                  <button className="text-stone-500 underline hover:text-route-700">Sign out</button>
+                  <button className="inline-flex min-h-11 shrink-0 items-center text-stone-500 underline hover:text-route-700">
+                    Sign out
+                  </button>
                 </form>
               </div>
             ) : (
-              <a href="/login" className="link text-sm">
+              <a href="/login" className="link inline-flex min-h-11 items-center text-sm">
                 Sign in
               </a>
             )}

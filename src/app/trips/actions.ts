@@ -22,5 +22,9 @@ export async function createTripAction(formData: FormData): Promise<void> {
     redirect(`/trips/new?error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/trip/${tripId}`);
+  // PlaySpace, not the default Agreed tab: a trip seconds old has nothing
+  // locked by definition, so Agreed could only greet its creator with one
+  // "Nothing locked yet" row per day and no way to change that. PlaySpace is
+  // where the first idea actually goes.
+  redirect(`/trip/${tripId}?tab=playspace`);
 }

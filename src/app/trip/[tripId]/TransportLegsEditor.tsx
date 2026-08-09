@@ -82,7 +82,7 @@ export default function TransportLegsEditor({
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input name="airline" defaultValue={row.airline} placeholder="Airline" className="input" />
             <input
               name="flightNumber"
@@ -91,7 +91,7 @@ export default function TransportLegsEditor({
               className="input"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input
               name="departureAirport"
               defaultValue={row.departureAirport}
@@ -105,7 +105,7 @@ export default function TransportLegsEditor({
               className="input"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <label className="text-sm">
               <span className="mb-1 block text-stone-700">Departs</span>
               <input type="datetime-local" name="departsAt" defaultValue={row.departsAt} required className="input" />

@@ -91,7 +91,7 @@ export default async function ProfilePage({
         ) : (
           <>
             <form action={updatePassportAction} className="grid gap-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-2 gap-3">
                 <input
                   name="fullName"
                   defaultValue={passport?.fullName ?? ""}
@@ -105,7 +105,7 @@ export default async function ProfilePage({
                   className="input"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid sm:grid-cols-3 gap-3">
                 <input
                   name="nationality"
                   defaultValue={passport?.nationality ?? ""}

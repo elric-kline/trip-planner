@@ -225,7 +225,7 @@ export default function DayCard({
         type="button"
         onClick={() => setItemsOpen((v) => !v)}
         aria-expanded={itemsOpen}
-        className="flex w-full items-start justify-between gap-3 text-left"
+        className="flex min-h-11 w-full items-center justify-between gap-3 text-left"
       >
         <h3 className="text-sm font-semibold text-stone-700">
           <span className="mr-1 inline-block w-3 text-stone-400">{itemsOpen ? "▾" : "▸"}</span>
@@ -257,7 +257,14 @@ export default function DayCard({
           aria-expanded={editOpen}
           aria-label="Edit wake/sleep and stops for this day"
           title="Edit wake/sleep and stops"
-          className="shrink-0 leading-none text-stone-400 hover:text-stone-700"
+          /*
+           * The glyph is ~20x16px, so the hit area has to come from the button
+           * rather than its contents -- at the old size this sat a few pixels
+           * from the header's own toggle and opened an entirely different
+           * panel when you missed. -mr-2 pulls the wider box back into the
+           * card's padding so the pencil stays visually where it was.
+           */
+          className="-mr-2 flex size-11 shrink-0 items-center justify-center leading-none text-stone-400 hover:text-stone-700"
         >
           ✏️
         </button>

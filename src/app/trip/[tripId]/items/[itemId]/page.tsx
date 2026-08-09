@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, canEditItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
-import { checkRsvp, checkShare, checkUnlock } from "@/lib/lifecycle.ts";
+import { checkDecline, checkRestore, checkRsvp, checkShare, checkUnlock } from "@/lib/lifecycle.ts";
 import { getLodgingDetails } from "@/lib/lodging.ts";
 import { getDiningDetails } from "@/lib/dining.ts";
 import { getTransportDetails, getTransportLegs } from "@/lib/transport.ts";
@@ -87,9 +87,19 @@ export default async function ItemPage({
   const lodgingEditable = item.category === "lodging" && editable;
   const diningEditable = item.category === "dining" && editable;
   const transportEditable = item.category === "transport" && editable;
+  const actor = { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id };
   const rsvpAllowed = checkRsvp(item).ok;
-  const unlockAllowed = checkUnlock(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
-  const shareAllowed = checkShare(item, { isPlanner: access.isPlanner, isAuthor: item.createdBy === access.viewer.id }).ok;
+  const unlockAllowed = checkUnlock(item, actor).ok;
+  const shareAllowed = checkShare(item, actor).ok;
+  // Decline and Restore used to render on status alone, so a member looking at
+  // someone else's proposal was offered Decline as the page's only action --
+  // and pressing it bounced them off the item to the trip's Agreed tab under
+  // "Only the person who added this, or a planner, can decline it." Both now
+  // ask the same lifecycle rule the server action enforces, like every
+  // sibling action above.
+  const declineAllowed = checkDecline(item, actor).ok;
+  const restoreAllowed = checkRestore(item, actor).ok;
+  const deleteAllowed = item.status !== "locked" && (editable || access.isPlanner);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -159,7 +169,7 @@ export default async function ItemPage({
                   below under Schedule, is what conflict checks use.
                 </span>
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid sm:grid-cols-3 gap-3">
                 <input
                   name="contactName"
                   defaultValue={lodging?.contactName ?? ""}
@@ -180,7 +190,7 @@ export default async function ItemPage({
                   className="input"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-2 gap-3">
                 <input
                   name="confirmationNumber"
                   defaultValue={lodging?.confirmationNumber ?? ""}
@@ -196,7 +206,7 @@ export default async function ItemPage({
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid sm:grid-cols-3 gap-3">
                 <select
                   name="paymentStatus"
                   defaultValue={lodging?.paymentStatus ?? ""}
@@ -400,7 +410,7 @@ export default async function ItemPage({
 
           {transportEditable ? (
             <form action={updateTransportDetailsAction.bind(null, tripId, itemId)} className="grid gap-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-2 gap-3">
                 <select name="subtype" defaultValue={transport?.subtype ?? "other"} className="input">
                   {Object.entries(TRANSPORT_SUBTYPE_LABEL).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -429,7 +439,7 @@ export default async function ItemPage({
                   </p>
                 </>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-2 gap-3">
                 <input
                   name="confirmationNumber"
                   defaultValue={transport?.confirmationNumber ?? ""}
@@ -445,7 +455,7 @@ export default async function ItemPage({
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid sm:grid-cols-2 gap-3">
                 <input
                   name="costAmount"
                   type="number"
@@ -668,7 +678,7 @@ export default async function ItemPage({
           {item.status === "proposed" && canLockItem(access) && item.visibility === "group" && (
             <a
               href={`/trip/${tripId}/items/${itemId}/lock`}
-              className="mt-3 inline-block btn-primary"
+              className="btn-primary mt-3"
             >
               Lock this in →
             </a>
@@ -704,24 +714,25 @@ export default async function ItemPage({
         </section>
       )}
 
-      <section className="flex gap-2">
-        {item.status === "declined" ? (
-          <form action={restoreItemAction.bind(null, tripId, itemId)}>
-            <button className="btn-secondary">Restore</button>
-          </form>
-        ) : (
-          item.status !== "locked" && (
+      {(restoreAllowed || declineAllowed || deleteAllowed) && (
+        <section className="flex flex-wrap items-center gap-3">
+          {restoreAllowed && (
+            <form action={restoreItemAction.bind(null, tripId, itemId)}>
+              <button className="btn-secondary">Restore</button>
+            </form>
+          )}
+          {declineAllowed && (
             <form action={declineItemAction.bind(null, tripId, itemId)}>
               <button className="btn-secondary">Decline</button>
             </form>
-          )
-        )}
-        {item.status !== "locked" && (editable || access.isPlanner) && (
-          <form action={deleteItemAction.bind(null, tripId, itemId)}>
-            <button className="text-sm text-red-600 underline">Delete</button>
-          </form>
-        )}
-      </section>
+          )}
+          {deleteAllowed && (
+            <form action={deleteItemAction.bind(null, tripId, itemId)}>
+              <button className="text-sm text-red-600 underline">Delete</button>
+            </form>
+          )}
+        </section>
+      )}
     </div>
   );
 

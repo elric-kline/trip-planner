@@ -26,6 +26,9 @@ export default async function NewTripPage({
         <Field label="Destination">
           <input name="destination" required placeholder="Oaxaca, Mexico" className="input" />
         </Field>
+        {/* Stays 2-up on mobile: `type=date` renders a short fixed-width value
+            (10/10/2026), the two belong together, and stacking them separates a
+            pair people read as one range. */}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start date">
             <input type="date" name="startDate" required className="input" />
