@@ -6,7 +6,7 @@ import type { TripDay } from "@/lib/days.ts";
 import type { Item } from "@/lib/scope.ts";
 import DayItemBuilder from "./DayItemBuilder.tsx";
 
-/** A short one-line preview of what's proposed for the day, shown whether or not it's open. */
+/** A one-line preview of what's proposed for the day, shown while it's collapsed. */
 function itemsSummary(items: Item[]): string {
   if (items.length === 0) return "No proposals yet";
   const shown = items.slice(0, 3).map((i) => i.title);
@@ -53,7 +53,9 @@ export default function PlaySpaceDayCard({
           <span className="mr-1 inline-block w-3 text-stone-400">{open ? "▾" : "▸"}</span>
           {formatCalendarDate(day.date)}
         </h3>
-        <span className="text-right text-xs text-stone-400">{itemsSummary(items)}</span>
+        {/* Collapsed only -- see DayCard. PlaySpace keeps its status badges,
+            though: idea / proposed / locked genuinely differ here. */}
+        {!open && <span className="text-right text-sm text-stone-500">{itemsSummary(items)}</span>}
       </button>
 
       {open && (

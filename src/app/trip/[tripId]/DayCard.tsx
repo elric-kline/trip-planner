@@ -9,7 +9,7 @@ import { ItemList } from "./itemDisplay.tsx";
 import Sheet from "./Sheet.tsx";
 import { addLocationAction, moveLocationAction, removeLocationAction, updateLocationAction } from "./actions.ts";
 
-/** A short one-line preview of what's locked for the day, shown whether or not it's open. Agreed only ever receives locked items -- see page.tsx. */
+/** A one-line preview of the day, shown while it's collapsed. Agreed only ever receives locked items -- see page.tsx. */
 function itemsSummary(items: Item[]): string {
   if (items.length === 0) return "Nothing locked yet";
   const shown = items.slice(0, 3).map((i) => i.title);
@@ -173,7 +173,7 @@ function LocationKindSection({
  * the expanded card, opening a sheet: impossible to hit by accident, and it
  * covers the day rather than displacing it.
  *
- * The always-visible summary line is filtered to locations that include
+ * The wake/sleep summary line is filtered to locations that include
  * the *viewer* -- "my personal view shows me where I'm going to be," not
  * everyone else's leg of a split day (see schema.ts's tripDayLocationMembers
  * for the Bethlehem/NYC example). The sheet shows every location regardless
@@ -234,12 +234,17 @@ export default function DayCard({
           <span className="mr-1 inline-block w-3 text-stone-400">{itemsOpen ? "▾" : "▸"}</span>
           {formatCalendarDate(day.date)}
         </h3>
-        <span className="text-right text-xs text-stone-400">{itemsSummary(items)}</span>
+        {/* Only while collapsed -- open, it repeated the very titles listed
+            directly beneath it. */}
+        {!itemsOpen && <span className="text-right text-sm text-stone-500">{itemsSummary(items)}</span>}
       </button>
 
       <div className="mt-0.5 pl-[1.35em]">
         <div className="text-xs text-stone-400">
-          {!hasAnythingForMe ? (
+          {/* On a day with nothing at all, the header already says "Nothing
+              locked yet" -- a second line saying no locations are set either
+              is the same news twice. Both still show when only one is true. */}
+          {!hasAnythingForMe && !hasAnythingAtAll && items.length === 0 ? null : !hasAnythingForMe ? (
             <p>{hasAnythingAtAll ? "Set for other travelers, not you" : "No wake/sleep or stops set yet"}</p>
           ) : (
             <>
@@ -261,7 +266,7 @@ export default function DayCard({
           {items.length === 0 ? (
             <p className="text-sm text-stone-400">Nothing locked in for this day yet.</p>
           ) : (
-            <ItemList tripId={tripId} items={items} timezone={timezone} />
+            <ItemList tripId={tripId} items={items} timezone={timezone} hideStatus />
           )}
           <button
             type="button"

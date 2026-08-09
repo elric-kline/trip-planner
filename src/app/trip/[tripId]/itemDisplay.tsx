@@ -37,10 +37,17 @@ export function ItemRow({
   tripId,
   item,
   timezone,
+  hideStatus = false,
 }: {
   tripId: string;
   item: Item;
   timezone: string;
+  /**
+   * Drops the status badge. Set inside the Agreed tab, where every row is
+   * locked by definition -- an emerald "locked" pill on each one is three
+   * identical badges telling you what the tab already said.
+   */
+  hideStatus?: boolean;
 }) {
   return (
     <a
@@ -61,7 +68,7 @@ export function ItemRow({
       </div>
       <div className="flex items-center gap-2">
         {item.commitment && <span className="badge bg-stone-100 text-stone-700">{item.commitment}</span>}
-        <span className={`badge ${STATUS_BADGE[item.status]}`}>{item.status}</span>
+        {!hideStatus && <span className={`badge ${STATUS_BADGE[item.status]}`}>{item.status}</span>}
       </div>
     </a>
   );
@@ -71,16 +78,18 @@ export function ItemList({
   tripId,
   items,
   timezone,
+  hideStatus = false,
 }: {
   tripId: string;
   items: Item[];
   timezone: string;
+  hideStatus?: boolean;
 }) {
   return (
     <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
       {items.map((item) => (
         <li key={item.id}>
-          <ItemRow tripId={tripId} item={item} timezone={timezone} />
+          <ItemRow tripId={tripId} item={item} timezone={timezone} hideStatus={hideStatus} />
         </li>
       ))}
     </ul>
