@@ -1,33 +1,72 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { AccessError, canLockItem, getItem, requireTripAccess } from "@/lib/scope.ts";
-import { previewLockImpact, type LockImpact } from "@/lib/conflicts-for.ts";
+import { previewLockImpact, type LockPreview } from "@/lib/conflicts-for.ts";
 import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
 import { lockItemAction } from "../../../actions.ts";
 
-function ImpactList({ impacts }: { impacts: LockImpact[] }) {
-  if (impacts.length === 0) {
-    return <p className="text-sm text-emerald-700">No new conflicts for anyone.</p>;
-  }
+/**
+ * What the check covered, then what it found, then what it couldn't see.
+ *
+ * The last part is the point. This used to print a flat "No new conflicts for
+ * anyone" whenever it turned up nothing -- including when it had inspected
+ * nobody at all, because an optional item with no backers puts the whole
+ * preview on an empty set. A confident sentence about an incomplete check, at
+ * the moment somebody commits the group.
+ */
+function PreviewBody({ preview, commitment }: { preview: LockPreview; commitment: "required" | "optional" }) {
+  const { checked, impacts, blindSpots } = preview;
+
   return (
-    <ul className="space-y-2 text-sm">
-      {impacts.map((impact) => (
-        <li key={impact.member.userId} className="rounded-md bg-amber-50 px-3 py-2 text-amber-900">
-          <strong>{impact.member.name ?? impact.member.email}</strong>
-          <ul className="mt-1 list-disc pl-5">
-            {impact.newFindings.map((f, i) => (
-              <li key={i}>
-                {f.severity === "conflict" ? "Conflict" : "Tight"}: <strong>{f.before.title}</strong> →{" "}
-                <strong>{f.after.title}</strong>
-                {f.reason === "overlap"
-                  ? " — these overlap in time."
-                  : ` — only ${Math.round(f.gapMinutes)} min for a ~${f.travelMinutes} min trip.`}
+    <div className="space-y-3">
+      <p className="text-sm text-stone-500">
+        {checked.length === 0
+          ? commitment === "optional"
+            ? "Nobody has said they're in yet, so there's nothing to check against."
+            : "No one on the trip yet."
+          : `Checked ${checked.length === 1 ? "1 schedule" : `${checked.length} schedules`}: ${checked
+              .map((m) => m.name ?? m.email)
+              .join(", ")}.`}
+      </p>
+
+      {impacts.length === 0 ? (
+        checked.length > 0 && <p className="text-sm text-emerald-700">No new conflicts for them.</p>
+      ) : (
+        <ul className="space-y-2 text-sm">
+          {impacts.map((impact) => (
+            <li key={impact.member.userId} className="rounded-md bg-amber-50 px-3 py-2 text-amber-900">
+              <strong>{impact.member.name ?? impact.member.email}</strong>
+              <ul className="mt-1 list-disc pl-5">
+                {impact.newFindings.map((f, i) => (
+                  <li key={i}>
+                    {f.severity === "conflict" ? "Conflict" : "Tight"}: <strong>{f.before.title}</strong> →{" "}
+                    <strong>{f.after.title}</strong>
+                    {f.reason === "overlap"
+                      ? " — these overlap in time."
+                      : ` — only ${Math.round(f.gapMinutes)} min for a ~${f.travelMinutes} min trip.`}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {blindSpots.length > 0 && (
+        <div className="rounded-md bg-stone-100 px-3 py-2 text-sm text-stone-600">
+          <p className="mb-1">Can&apos;t say yet:</p>
+          <ul className="list-disc space-y-0.5 pl-5">
+            {blindSpots.map((spot) => (
+              <li key={spot.itemId}>
+                {spot.members.map((m) => m.name ?? m.email).join(", ")}{" "}
+                {spot.members.length === 1 ? "hasn't" : "haven't"} answered{" "}
+                <strong>{spot.title}</strong>, which overlaps this — if that turns into a yes, it clashes.
               </li>
             ))}
           </ul>
-        </li>
-      ))}
-    </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -66,7 +105,10 @@ export default async function LockPreviewPage({
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <a href={`/trip/${tripId}/items/${itemId}`} className="text-sm text-stone-500 underline">
+      <a
+        href={`/trip/${tripId}/items/${itemId}`}
+        className="inline-flex min-h-11 items-center text-sm text-stone-500 underline"
+      >
         ← Back
       </a>
       <div>
@@ -81,7 +123,7 @@ export default async function LockPreviewPage({
             Everyone on the trip is automatically attending — no RSVP.
           </p>
           <div className="mb-3">
-            <ImpactList impacts={requiredImpact} />
+            <PreviewBody preview={requiredImpact} commitment="required" />
           </div>
           <form action={lockItemAction.bind(null, tripId, itemId, "required")}>
             <button className="btn-primary w-full">Lock as required</button>
@@ -94,7 +136,7 @@ export default async function LockPreviewPage({
             Booked and reserved, but people opt in via RSVP.
           </p>
           <div className="mb-3">
-            <ImpactList impacts={optionalImpact} />
+            <PreviewBody preview={optionalImpact} commitment="optional" />
           </div>
           <form action={lockItemAction.bind(null, tripId, itemId, "optional")}>
             <button className="btn-secondary w-full">Lock as optional</button>

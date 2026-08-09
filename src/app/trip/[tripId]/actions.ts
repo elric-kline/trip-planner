@@ -36,6 +36,7 @@ import {
   setLocationMembers,
   type DayLocationKind,
 } from "@/lib/days.ts";
+import { addComment, deleteComment } from "@/lib/comments.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import type { DietaryTag } from "@/lib/dietary.ts";
@@ -365,6 +366,36 @@ export async function setRsvpAction(
   }
   revalidatePath(`/trip/${tripId}`);
   redirect(`/trip/${tripId}/items/${itemId}`);
+}
+
+export async function addCommentAction(
+  tripId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await addComment(access, itemId, String(formData.get("body") ?? ""));
+  } catch (err) {
+    withItemError(tripId, itemId, err);
+  }
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
+}
+
+export async function deleteCommentAction(
+  tripId: string,
+  itemId: string,
+  commentId: string,
+): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await deleteComment(access, commentId);
+  } catch (err) {
+    withItemError(tripId, itemId, err);
+  }
+  revalidatePath(`/trip/${tripId}/items/${itemId}`);
 }
 
 /**

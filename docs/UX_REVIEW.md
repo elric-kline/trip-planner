@@ -199,17 +199,41 @@ diverge for real reasons — `DayCard` owns the wake/sleep editor and
 viewer-filtered locations, `PlaySpaceDayCard` owns `DayItemBuilder`. A mode flag
 would cost more than the duplication.
 
-### Tier 3 — Close the product gap
+### Tier 3 — Close the product gap — **complete**
 
-The next cycle. This is what makes it a group product rather than a shared note.
+This is what makes it a group product rather than a shared note.
 
 | # | Change | Notes |
 |---|---|---|
 | 12 | Let members say yes before the decision, not after | **Shipped.** Same `item_rsvps` record throughout, voided on a rival when something is locked as required |
 | 13 | Run conflict analysis on proposals and surface it in PlaySpace | **Shipped.** A proposal joins your timeline exactly when you've said you're in, which is what stops competing options colliding with each other |
 | 14 | Make the conflict alert actionable | **Shipped.** Both titles link, a "Change the time" link opens the editor, and the offending rows carry a ⚠ |
-| 15 | Say what the lock preview actually checked | "No conflicts for the 1 person who has RSVP'd" beats a confident "none for anyone" that is not true |
-| 16 | Add a comment thread per item | The cheapest answer to "why is this here?" |
+| 15 | Say what the lock preview actually checked | **Shipped.** Names the schedules covered, and declares the overlapping items nobody has answered instead of looking past them |
+| 16 | Add a comment thread per item | **Shipped.** One thread per item, inheriting the item's own visibility rather than carrying a second rule |
+
+### What 15 and 16 ended up doing
+
+**15.** `previewLockImpact` returns `{ checked, impacts, blindSpots }` rather
+than a bare impact list. `checked` is who the analysis actually covered --
+everyone for a required lock, only the people who said they're in for an
+optional one. `blindSpots` names overlapping group items some checked member
+hasn't answered: their timeline can't include it, so a clean result is clean
+*so far*. A definite "no" isn't a blind spot; an absent answer or a "maybe" is,
+because either can still turn into a yes.
+
+The bad case that prompted this was an optional lock with no backers, which
+checked nobody at all and still reported "No new conflicts for anyone."
+
+**16.** Comments hang off the item, not the trip, so the reason something was
+suggested survives the idea → proposal → locked promotion. They carry no
+visibility rule of their own: `listComments` and `addComment` call `getItem`
+first, so a thread is exactly as visible as the item it's on, and a private
+item's thread is as private as the item. Deleting is the author or a planner.
+Deleting the item takes the thread with it, via the foreign key.
+
+Both `Delete` buttons on the item page (a comment's, and the item's own) now
+carry distinct `aria-label`s -- same visible word, different objects, and
+nothing but panel position to tell them apart otherwise.
 
 ## Which items need which model
 
@@ -341,6 +365,13 @@ There are four independent editability gates and they deliberately disagree:
 arrives *after* the lock. Collapsing three forms into one Save is exactly what
 flattens that asymmetry, and a locked item would either lose booking-detail
 editing or wrongly regain title editing. The layout is the easy half.
+
+## Status
+
+All three tiers are shipped. What remains from the findings list are the
+items that never had a plan number: the two-form sign-in, the IANA timezone
+field, the homepage, names instead of email addresses, and the fact that
+"Invite by email" still sends no email.
 
 ## Verification
 

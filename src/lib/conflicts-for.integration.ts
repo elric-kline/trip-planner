@@ -345,7 +345,11 @@ test("previewLockImpact: no time or a private candidate means nothing to preview
   t.after(() => cleanupTrip(trip.id, userIds));
 
   const idea = await createItem(plannerAccess, { title: "No time yet" });
-  assert.deepEqual(await previewLockImpact(plannerAccess, idea, "required"), []);
+  assert.deepEqual(await previewLockImpact(plannerAccess, idea, "required"), {
+    checked: [],
+    impacts: [],
+    blindSpots: [],
+  });
 
   const privateProposed = await scheduleItem(
     plannerAccess,
@@ -353,7 +357,11 @@ test("previewLockImpact: no time or a private candidate means nothing to preview
     new Date("2026-09-05T09:00:00Z"),
     null,
   );
-  assert.deepEqual(await previewLockImpact(plannerAccess, privateProposed, "required"), []);
+  assert.deepEqual(await previewLockImpact(plannerAccess, privateProposed, "required"), {
+    checked: [],
+    impacts: [],
+    blindSpots: [],
+  });
 });
 
 test("previewLockImpact: locking a required candidate that overlaps an existing item surfaces the new conflict for every member", async (t) => {
@@ -368,7 +376,7 @@ test("previewLockImpact: locking a required candidate that overlaps an existing 
     null,
   );
 
-  const impacts = await previewLockImpact(plannerAccess, candidate, "required");
+  const { impacts } = await previewLockImpact(plannerAccess, candidate, "required");
   const affectedIds = impacts.map((i) => i.member.userId).sort();
   assert.deepEqual(affectedIds, [memberA.id, plannerAccess.viewer.id].sort());
   for (const impact of impacts) {
@@ -507,11 +515,100 @@ test("previewLockImpact doesn't report the candidate colliding with itself", asy
   // which is exactly when it could have been double-counted.
   await setRsvp(memberAAccess, candidate.id, "yes");
 
-  const impacts = await previewLockImpact(
+  const { impacts } = await previewLockImpact(
     plannerAccess,
     await getItem(plannerAccess, candidate.id),
     "required",
   );
   const forMember = impacts.find((i) => i.member.userId === memberA.id);
   assert.equal(forMember, undefined, "nothing else is scheduled, so there is nothing to clash with");
+});
+
+test("previewLockImpact reports who it checked, not just what it found", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess, memberA } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const candidate = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Optional tour" })).id,
+    new Date("2026-09-10T09:00:00Z"),
+    new Date("2026-09-10T11:00:00Z"),
+  );
+
+  // Locking as optional with nobody backing it checks nobody at all -- which
+  // is precisely when a bare "no new conflicts" was a lie of omission.
+  const cold = await previewLockImpact(plannerAccess, candidate, "optional");
+  assert.deepEqual(cold.checked, []);
+  assert.deepEqual(cold.impacts, []);
+
+  // Required covers the whole trip regardless of answers.
+  const required = await previewLockImpact(plannerAccess, candidate, "required");
+  assert.equal(required.checked.length, 2);
+
+  await setRsvp(memberAAccess, candidate.id, "yes");
+  const warm = await previewLockImpact(plannerAccess, candidate, "optional");
+  assert.deepEqual(
+    warm.checked.map((m) => m.userId),
+    [memberA.id],
+    "optional checks exactly the people who said they're in",
+  );
+});
+
+test("previewLockImpact names the overlapping items nobody has answered yet", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess, memberA } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  // An unanswered rival for the same slot: invisible to the timeline check,
+  // because an item only lands there once somebody says yes.
+  const rival = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Rival plan" })).id,
+    new Date("2026-09-11T10:00:00Z"),
+    new Date("2026-09-11T12:00:00Z"),
+  );
+  const candidate = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Candidate plan" })).id,
+    new Date("2026-09-11T11:00:00Z"),
+    new Date("2026-09-11T13:00:00Z"),
+  );
+
+  const preview = await previewLockImpact(plannerAccess, candidate, "required");
+  assert.deepEqual(preview.impacts, [], "nothing is on anyone's timeline, so nothing collides");
+  assert.equal(preview.blindSpots.length, 1, "but the check says it couldn't see the rival");
+  assert.equal(preview.blindSpots[0].title, "Rival plan");
+  assert.equal(preview.blindSpots[0].members.length, 2, "neither member has answered it");
+
+  // A definite "no" is a decision, not a blind spot.
+  await setRsvp(memberAAccess, rival.id, "no");
+  const after = await previewLockImpact(plannerAccess, candidate, "required");
+  assert.deepEqual(
+    after.blindSpots[0].members.map((m) => m.userId),
+    [plannerAccess.viewer.id],
+    "the member who declined the rival drops out of the caveat",
+  );
+  assert.ok(!after.blindSpots[0].members.some((m) => m.userId === memberA.id));
+});
+
+test("an overlapping item everyone has answered is not a blind spot", async (t) => {
+  const { trip, userIds, plannerAccess, memberAAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const rival = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Answered rival" })).id,
+    new Date("2026-09-12T10:00:00Z"),
+    new Date("2026-09-12T12:00:00Z"),
+  );
+  const candidate = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Candidate" })).id,
+    new Date("2026-09-12T11:00:00Z"),
+    new Date("2026-09-12T13:00:00Z"),
+  );
+  await setRsvp(plannerAccess, rival.id, "no");
+  await setRsvp(memberAAccess, rival.id, "no");
+
+  const preview = await previewLockImpact(plannerAccess, candidate, "required");
+  assert.deepEqual(preview.blindSpots, []);
 });
