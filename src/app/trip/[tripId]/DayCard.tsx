@@ -6,6 +6,7 @@ import type { DayLocationKind, TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
 import { ItemList } from "./itemDisplay.tsx";
+import Sheet from "./Sheet.tsx";
 import { addLocationAction, moveLocationAction, removeLocationAction, updateLocationAction } from "./actions.ts";
 
 /** A short one-line preview of what's locked for the day, shown whether or not it's open. Agreed only ever receives locked items -- see page.tsx. */
@@ -163,23 +164,25 @@ function LocationKindSection({
  * proposing and comparing things that aren't locked yet; this one is
  * read-only on purpose.)
  *
- * A day's own header (date, locked-item preview, and its wake/sleep/stops
- * definition) is always visible; the two things it can expand -- the
- * locked-item list and the day-properties editor -- are independent
- * toggles, not nested `<details>`, because a pencil living inside a native
- * `<summary>` would also toggle the whole card open on every click. Plain
- * client state instead: clicking the header opens/closes the locked-item
- * list, clicking the pencil opens/closes the wake/sleep/stops editor
- * (properties *of* the day itself, still editable here even though items
- * aren't -- once locked in, it's the definition of the agreed plan, not a
- * proposal).
+ * The card has exactly one tap target: the header row, which opens the
+ * locked-item list. Wake/sleep/stops setup used to sit behind a pencil glyph
+ * a few pixels below that row -- a 20x16px target next to a full-width one,
+ * opening an entirely different panel when you missed, and unfolding three
+ * near-identical location editors inline that shoved the rest of the
+ * itinerary down the page. It's now an "Edit wake/sleep and stops" row inside
+ * the expanded card, opening a sheet: impossible to hit by accident, and it
+ * covers the day rather than displacing it.
  *
  * The always-visible summary line is filtered to locations that include
  * the *viewer* -- "my personal view shows me where I'm going to be," not
  * everyone else's leg of a split day (see schema.ts's tripDayLocationMembers
- * for the Bethlehem/NYC example). The pencil's editor panel shows every
- * location regardless of who's in it, since managing the whole party's
- * plan is still any trip member's job.
+ * for the Bethlehem/NYC example). The sheet shows every location regardless
+ * of who's in it, since managing the whole party's plan is still any trip
+ * member's job.
+ *
+ * Day properties stay editable here even though the items aren't -- once
+ * locked in, an item is the definition of the agreed plan rather than a
+ * proposal, but where people sleep is still a fact about the day.
  */
 export default function DayCard({
   tripId,
@@ -202,7 +205,7 @@ export default function DayCard({
   viewerId: string;
 }) {
   const [itemsOpen, setItemsOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
 
   const wakes = locations.filter((l) => l.kind === "wake");
   const sleeps = locations.filter((l) => l.kind === "sleep");
@@ -234,7 +237,7 @@ export default function DayCard({
         <span className="text-right text-xs text-stone-400">{itemsSummary(items)}</span>
       </button>
 
-      <div className="mt-0.5 flex items-start justify-between gap-2 pl-[1.35em]">
+      <div className="mt-0.5 pl-[1.35em]">
         <div className="text-xs text-stone-400">
           {!hasAnythingForMe ? (
             <p>{hasAnythingAtAll ? "Set for other travelers, not you" : "No wake/sleep or stops set yet"}</p>
@@ -251,27 +254,32 @@ export default function DayCard({
             </>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setEditOpen((v) => !v)}
-          aria-expanded={editOpen}
-          aria-label="Edit wake/sleep and stops for this day"
-          title="Edit wake/sleep and stops"
-          /*
-           * The glyph is ~20x16px, so the hit area has to come from the button
-           * rather than its contents -- at the old size this sat a few pixels
-           * from the header's own toggle and opened an entirely different
-           * panel when you missed. -mr-2 pulls the wider box back into the
-           * card's padding so the pencil stays visually where it was.
-           */
-          className="-mr-2 flex size-11 shrink-0 items-center justify-center leading-none text-stone-400 hover:text-stone-700"
-        >
-          ✏️
-        </button>
       </div>
 
-      {editOpen && (
-        <div className="mt-3 space-y-4 rounded-md border border-stone-100 bg-stone-50 p-3">
+      {itemsOpen && (
+        <div className="mt-4 space-y-3 border-t border-stone-100 pt-4">
+          {items.length === 0 ? (
+            <p className="text-sm text-stone-400">Nothing locked in for this day yet.</p>
+          ) : (
+            <ItemList tripId={tripId} items={items} timezone={timezone} />
+          )}
+          <button
+            type="button"
+            onClick={() => setSetupOpen(true)}
+            className="inline-flex min-h-11 items-center text-sm text-stone-500 underline hover:text-stone-800"
+          >
+            Edit wake/sleep and stops
+          </button>
+        </div>
+      )}
+
+      <Sheet
+        open={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        title={formatCalendarDate(day.date)}
+        description="Where everyone wakes, sleeps, and stops on this day."
+      >
+        <div className="space-y-5">
           <LocationKindSection
             tripId={tripId}
             dayId={day.id}
@@ -303,17 +311,7 @@ export default function DayCard({
             members={members}
           />
         </div>
-      )}
-
-      {itemsOpen && (
-        <div className="mt-4 border-t border-stone-100 pt-4">
-          {items.length === 0 ? (
-            <p className="text-sm text-stone-400">Nothing locked in for this day yet.</p>
-          ) : (
-            <ItemList tripId={tripId} items={items} timezone={timezone} />
-          )}
-        </div>
-      )}
+      </Sheet>
     </div>
   );
 }

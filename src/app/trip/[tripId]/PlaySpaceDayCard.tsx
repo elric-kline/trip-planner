@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { formatCalendarDate } from "@/lib/time.ts";
 import type { TripDay } from "@/lib/days.ts";
-import type { Item, TripMemberSummary } from "@/lib/scope.ts";
+import type { Item } from "@/lib/scope.ts";
 import DayItemBuilder from "./DayItemBuilder.tsx";
 
 /** A short one-line preview of what's proposed for the day, shown whether or not it's open. */
@@ -21,28 +21,23 @@ function itemsSummary(items: Item[]): string {
  * conflicts against what's already agreed are visible before it goes
  * anywhere), on the way to eventually being locked and moving to Agreed.
  *
- * Deliberately leaner than Agreed's DayCard: no wake/sleep/stops editor --
+ * Deliberately leaner than Agreed's DayCard: no wake/sleep/stops setup --
  * those are settled facts about the day, edited from Agreed, not proposed
- * here. Just the day's header and its item workspace (DayItemBuilder,
- * which already handles the full add/hover-insert/time-governs-order
- * flow) -- no separate open/closed state for a properties panel that
- * doesn't exist on this card.
+ * here. Just the day's header and its item workspace (DayItemBuilder, which
+ * handles adding, inserting between two items, and letting a time override
+ * the manual order).
  */
 export default function PlaySpaceDayCard({
   tripId,
   day,
   items,
   timezone,
-  destination,
-  members,
 }: {
   tripId: string;
   day: TripDay;
   /** Every non-declined, non-private item for this day: idea, proposed, AND locked. */
   items: Item[];
   timezone: string;
-  destination: string;
-  members: TripMemberSummary[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -63,17 +58,15 @@ export default function PlaySpaceDayCard({
 
       {open && (
         <div className="mt-4 border-t border-stone-100 pt-4">
-          {/* Keyed on the item count so a successful add remounts the
-              builder fresh, collapsing whichever inline form was open back
-              to its "+ Add" button -- see DayItemBuilder for why. */}
+          {/* Keyed on the item count so a successful add remounts the builder
+              fresh, which closes whichever add sheet was open -- see
+              AddItemSheet for why that's the close mechanism. */}
           <DayItemBuilder
             key={items.length}
             tripId={tripId}
             dayId={day.id}
             items={items}
             timezone={timezone}
-            destination={destination}
-            members={members}
           />
         </div>
       )}

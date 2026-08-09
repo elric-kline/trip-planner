@@ -10,7 +10,7 @@ import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { getAssistantHistory } from "@/lib/assistant.ts";
 import { createInviteAction, shareItemAction, setMemberRoleAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
-import AddItemForm from "./AddItemForm.tsx";
+import AddItemSheet from "./AddItemSheet.tsx";
 import ShareInviteButton from "./ShareInviteButton.tsx";
 import AgreedDaysSection from "./AgreedDaysSection.tsx";
 import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
@@ -220,8 +220,8 @@ export default async function TripPage({
                 aria-current={itineraryView === "mine" ? "page" : undefined}
                 className={
                   itineraryView === "mine"
-                    ? "font-medium text-stone-900 underline"
-                    : "text-stone-500 underline hover:text-stone-700"
+                    ? "inline-flex min-h-11 items-center font-medium text-stone-900 underline"
+                    : "inline-flex min-h-11 items-center text-stone-500 underline hover:text-stone-700"
                 }
               >
                 My Itinerary
@@ -232,8 +232,8 @@ export default async function TripPage({
                 aria-current={itineraryView === "all" ? "page" : undefined}
                 className={
                   itineraryView === "all"
-                    ? "font-medium text-stone-900 underline"
-                    : "text-stone-500 underline hover:text-stone-700"
+                    ? "inline-flex min-h-11 items-center font-medium text-stone-900 underline"
+                    : "inline-flex min-h-11 items-center text-stone-500 underline hover:text-stone-700"
                 }
               >
                 View All
@@ -265,7 +265,7 @@ export default async function TripPage({
       )}
 
       {activeTab === "playspace" && (
-        <div className="space-y-6">
+        <div className="space-y-6 pb-20">
           <p className="text-xs text-stone-400">
             Everything shared with the group, overlapping in time — plus whatever&apos;s already locked (flagged
             below) so you can see conflicts before locking something new. The Planner locks the winner, which
@@ -276,8 +276,6 @@ export default async function TripPage({
             days={days}
             itemsByDay={inPlayByDay}
             timezone={access.trip.timezone}
-            destination={access.trip.destination}
-            members={access.members}
           />
 
           <Section title="Ideas" subtitle="Shared, but not on a day yet">
@@ -294,19 +292,20 @@ export default async function TripPage({
             </Section>
           )}
 
-          <Section title="Add an idea to share">
-            <AddItemForm
-              tripId={tripId}
-              destination={access.trip.destination}
-              members={access.members}
-              visibility="group"
-            />
-          </Section>
+          {/* Keyed on the item count so a successful add remounts the sheet
+              closed -- see AddItemSheet. */}
+          <AddItemSheet
+            key={`group-${inPlay.length}`}
+            tripId={tripId}
+            visibility="group"
+            trigger="floating"
+            label="Add an idea"
+          />
         </div>
       )}
 
       {activeTab === "scratchpad" && (
-        <div className="space-y-6">
+        <div className="space-y-6 pb-20">
           <p className="text-xs text-stone-400">Yours alone until you share it — nobody else on the trip can see these.</p>
 
           <Section title="Trip assistant">
@@ -327,14 +326,13 @@ export default async function TripPage({
             </Section>
           )}
 
-          <Section title="Add a private idea">
-            <AddItemForm
-              tripId={tripId}
-              destination={access.trip.destination}
-              members={access.members}
-              visibility="private"
-            />
-          </Section>
+          <AddItemSheet
+            key={`private-${scratchpad.length}`}
+            tripId={tripId}
+            visibility="private"
+            trigger="floating"
+            label="Add a private idea"
+          />
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import type { TripDay } from "@/lib/days.ts";
-import type { Item, TripMemberSummary } from "@/lib/scope.ts";
+import type { Item } from "@/lib/scope.ts";
 import PlaySpaceDayCard from "./PlaySpaceDayCard.tsx";
 
 /**
@@ -15,15 +15,11 @@ export default function PlaySpaceDaysSection({
   days,
   itemsByDay,
   timezone,
-  destination,
-  members,
 }: {
   tripId: string;
   days: TripDay[];
   itemsByDay: Map<string, Item[]>;
   timezone: string;
-  destination: string;
-  members: TripMemberSummary[];
 }) {
   return (
     <div className="space-y-3">
@@ -34,8 +30,6 @@ export default function PlaySpaceDaysSection({
           day={day}
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
-          destination={destination}
-          members={members}
         />
       ))}
     </div>
