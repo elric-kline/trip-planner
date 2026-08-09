@@ -316,6 +316,32 @@ test("a tool loop that never reaches a terminal reply gives up after the round b
   assert.match((result as { error: string }).error, /more back-and-forth/);
 });
 
+test("a server tool (e.g. web_fetch) that pause_turns more than MAX_ROUNDS times before finishing still succeeds -- pause_turn doesn't spend the tool_use budget", async (t) => {
+  // This is the exact production shape once web_fetch shipped: Anthropic's
+  // own per-turn cap on server-tool iterations is 10, well past the
+  // MAX_ROUNDS=8 that used to be shared with real tool_use rounds -- a
+  // single slow page fetch pause_turning nine times used to exhaust the
+  // whole budget and fail with "more back-and-forth" before the model ever
+  // got a real decision point. It shouldn't, and now doesn't.
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    const call = fetchMock.mock.calls.length;
+    if (call < 9) return textResponse(`Still working (${call})...`, "pause_turn");
+    return textResponse("Found the hours: open until 10pm.");
+  });
+
+  const result = await runAssistantTurn("key", "sys", [], "what are the hours?", NO_TOOLS, NO_EXECUTORS);
+  assert.deepEqual(result, { reply: "Found the hours: open until 10pm." });
+  assert.equal(fetchMock.mock.calls.length, 10);
+});
+
+test("pause_turn resumes have their own ceiling too, so a genuinely stuck server tool still gives up rather than looping forever", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => textResponse("Still working...", "pause_turn"));
+
+  const result = await runAssistantTurn("key", "sys", [], "what are the hours?", NO_TOOLS, NO_EXECUTORS);
+  assert.ok("error" in result);
+  assert.match((result as { error: string }).error, /taking longer than expected/);
+});
+
 test("gives up before even calling out if the time budget is already exhausted going in", async (t) => {
   const fetchMock = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("should never be called -- the budget check should short-circuit first");
