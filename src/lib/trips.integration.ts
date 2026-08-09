@@ -253,3 +253,39 @@ test("setMemberRole rejects a target who isn't actually on the trip", async (t) 
   const access = await requireTripAccess(trip.id, owner);
   await assert.rejects(() => setMemberRole(access, outsider.id, "co_planner"));
 });
+
+test("an invite carries the role it was created with, so a co-planner arrives as one", async (t) => {
+  const owner = await createTestUser();
+  const helper = await createTestUser();
+  const guest = await createTestUser();
+  const trip = await createTestTrip(owner);
+  t.after(() => cleanupTrip(trip.id, [owner.id, helper.id, guest.id]));
+
+  const asCoPlanner = await createInvite(trip.id, owner, { email: helper.email, role: "co_planner" });
+  await acceptInvite(asCoPlanner.token, helper);
+  const helperAccess = await requireTripAccess(trip.id, helper);
+  assert.equal(helperAccess.isPlanner, true, "a co-planner can lock things in");
+
+  const asParticipant = await createInvite(trip.id, owner, { email: guest.email });
+  await acceptInvite(asParticipant.token, guest);
+  const guestAccess = await requireTripAccess(trip.id, guest);
+  assert.equal(guestAccess.isPlanner, false, "the default invite is still a plain participant");
+});
+
+test("a co-planner can invite, including another co-planner", async (t) => {
+  const owner = await createTestUser();
+  const helper = await createTestUser();
+  const third = await createTestUser();
+  const trip = await createTestTrip(owner);
+  t.after(() => cleanupTrip(trip.id, [owner.id, helper.id, third.id]));
+
+  const first = await createInvite(trip.id, owner, { role: "co_planner" });
+  await acceptInvite(first.token, helper);
+  assert.equal((await requireTripAccess(trip.id, helper)).isPlanner, true);
+
+  // The action gates on isPlanner, which co_planner satisfies -- this is the
+  // library half of that being true.
+  const second = await createInvite(trip.id, helper, { role: "co_planner" });
+  await acceptInvite(second.token, third);
+  assert.equal((await requireTripAccess(trip.id, third)).isPlanner, true);
+});

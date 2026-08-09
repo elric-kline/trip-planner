@@ -18,9 +18,16 @@ import { useState } from "react";
 export default function ShareInviteButton({
   url,
   tripName,
+  delivery = "none",
 }: {
   url: string;
   tripName: string;
+  /**
+   * Whether the invite actually reached anyone. "none" means no address was
+   * given, so sharing the link is the whole job; "failed" means we tried and
+   * couldn't, which the planner needs to know before assuming it arrived.
+   */
+  delivery?: "sent" | "failed" | "none";
 }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -54,7 +61,11 @@ export default function ShareInviteButton({
   return (
     <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3">
       <p className="mb-2 text-sm font-medium text-blue-900">
-        Invite link ready — anyone with it can join {tripName}.
+        {delivery === "sent"
+          ? `Invite sent. They can also use this link.`
+          : delivery === "failed"
+            ? `We couldn't send that email — share this link instead.`
+            : `Invite link ready — anyone with it can join ${tripName}.`}
       </p>
       <button type="button" onClick={share} className="btn-primary w-full sm:w-auto">
         Share invite

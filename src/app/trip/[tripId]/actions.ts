@@ -37,6 +37,8 @@ import {
   type DayLocationKind,
 } from "@/lib/days.ts";
 import { addComment, deleteComment } from "@/lib/comments.ts";
+import { sendTripInvite } from "@/lib/email.ts";
+import { absoluteOrigin } from "@/lib/url.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
 import type { Commitment } from "@/lib/lifecycle.ts";
 import type { DietaryTag } from "@/lib/dietary.ts";
@@ -540,15 +542,52 @@ export async function updateTransportLegsAction(
   redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
+/**
+ * Creates the invite and, when an address was given, actually sends it.
+ *
+ * The field was labelled "Invite by email (optional)" and sent nothing. What
+ * it did instead was invisible: scope the invite to that address, so the link
+ * silently stopped working for anybody else. It promised delivery and quietly
+ * did the opposite of what the planner would expect.
+ *
+ * A failed send doesn't discard the invite. The row is already written and the
+ * link is shown on the trip page either way -- losing a usable invite because
+ * a mail provider hiccuped would be worse than saying "we couldn't send it,
+ * here's the link."
+ */
 export async function createInviteAction(tripId: string, formData: FormData): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
   if (!access.isPlanner) withError(tripId, new Error("Only a planner can send invites."));
 
   const email = String(formData.get("email") ?? "").trim() || undefined;
-  const invite = await createInvite(tripId, user, { email });
+  // Only ever the two roles the form offers. master_planner is deliberately
+  // not reachable here: there's exactly one, it's whoever made the trip, and
+  // setMemberRole refuses to change it (see trips.ts).
+  const asCoPlanner = formData.get("role") === "co_planner";
 
-  redirect(`/trip/${tripId}?invite=${invite.token}`);
+  const invite = await createInvite(tripId, user, {
+    email,
+    role: asCoPlanner ? "co_planner" : "participant",
+  });
+
+  const url = `${await absoluteOrigin()}/invite/${invite.token}`;
+  let delivery: "sent" | "failed" | "none" = "none";
+  if (email) {
+    try {
+      await sendTripInvite(email, url, {
+        tripName: access.trip.name,
+        invitedBy: user.name ?? user.email,
+        asCoPlanner,
+      });
+      delivery = "sent";
+    } catch (err) {
+      console.warn(`[invite] could not email ${email}:`, err);
+      delivery = "failed";
+    }
+  }
+
+  redirect(`/trip/${tripId}?invite=${invite.token}&delivery=${delivery}`);
 }
 
 /** Appoints or revokes a co-planner -- see trips.ts's setMemberRole for the actual rules (unlimited, any existing planner may do it, the original master_planner is untouchable). */
