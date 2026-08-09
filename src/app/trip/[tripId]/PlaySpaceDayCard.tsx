@@ -32,12 +32,14 @@ export default function PlaySpaceDayCard({
   day,
   items,
   timezone,
+  supportCounts,
 }: {
   tripId: string;
   day: TripDay;
   /** Every non-declined, non-private item for this day: idea, proposed, AND locked. */
   items: Item[];
   timezone: string;
+  supportCounts?: Map<string, number>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -69,6 +71,7 @@ export default function PlaySpaceDayCard({
             dayId={day.id}
             items={items}
             timezone={timezone}
+            supportCounts={supportCounts}
           />
         </div>
       )}

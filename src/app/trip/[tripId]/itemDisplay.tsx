@@ -38,6 +38,7 @@ export function ItemRow({
   item,
   timezone,
   hideStatus = false,
+  supportCount,
 }: {
   tripId: string;
   item: Item;
@@ -48,6 +49,13 @@ export function ItemRow({
    * identical badges telling you what the tab already said.
    */
   hideStatus?: boolean;
+  /**
+   * How many people have said "I'm in". Shown in PlaySpace, where the whole
+   * question is which of several options the group actually wants -- a planner
+   * comparing three Saturday ideas needs that on the row, not one tap deeper.
+   * Omitted in Agreed, where the decision has already been made.
+   */
+  supportCount?: number;
 }) {
   return (
     <a
@@ -64,6 +72,12 @@ export function ItemRow({
         <div className="text-sm text-stone-500">
           {item.startsAt ? formatItemTime(item, timezone) : "No time yet"}
           {item.locationName ? ` · ${item.locationName}` : ""}
+          {/* On the detail line rather than as a right-hand badge: at 390px the
+              badge column already carries status, and a second pill there wraps
+              to two lines mid-row. */}
+          {supportCount != null && supportCount > 0 && (
+            <span className="whitespace-nowrap font-medium text-emerald-700"> · {supportCount} in</span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -79,17 +93,25 @@ export function ItemList({
   items,
   timezone,
   hideStatus = false,
+  supportCounts,
 }: {
   tripId: string;
   items: Item[];
   timezone: string;
   hideStatus?: boolean;
+  supportCounts?: Map<string, number>;
 }) {
   return (
     <ul className="divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
       {items.map((item) => (
         <li key={item.id}>
-          <ItemRow tripId={tripId} item={item} timezone={timezone} hideStatus={hideStatus} />
+          <ItemRow
+            tripId={tripId}
+            item={item}
+            timezone={timezone}
+            hideStatus={hideStatus}
+            supportCount={supportCounts?.get(item.id)}
+          />
         </li>
       ))}
     </ul>

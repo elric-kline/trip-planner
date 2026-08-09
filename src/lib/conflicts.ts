@@ -40,6 +40,31 @@ export type ScheduleFinding = {
 /** Items with no end time are assumed to occupy this long, e.g. a meal or a museum stop. */
 export const DEFAULT_DURATION_MINUTES = 60;
 
+/**
+ * The time an item actually occupies, with the default duration standing in
+ * for a missing end. Exported because "do these two collide?" is asked
+ * outside timeline analysis too -- see items.ts, where locking something as
+ * required voids the RSVPs on whatever it displaces.
+ */
+export function occupiedWindow(item: { startsAt: Date; endsAt: Date | null }): { start: number; end: number } {
+  const start = item.startsAt.getTime();
+  return { start, end: (item.endsAt ?? new Date(start + DEFAULT_DURATION_MINUTES * 60_000)).getTime() };
+}
+
+/**
+ * Half-open overlap: two items that merely touch (one ends exactly as the
+ * next begins) don't collide, which is the same boundary analyzeTimeline
+ * uses when it treats a zero gap as tight rather than as a conflict.
+ */
+export function windowsOverlap(
+  a: { startsAt: Date; endsAt: Date | null },
+  b: { startsAt: Date; endsAt: Date | null },
+): boolean {
+  const wa = occupiedWindow(a);
+  const wb = occupiedWindow(b);
+  return wa.start < wb.end && wb.start < wa.end;
+}
+
 /** Below this the gap counts as "tight at best" even though it isn't negative. */
 function tightThresholdMinutes(travelMinutes: number): number {
   return Math.max(10, travelMinutes * 0.25);

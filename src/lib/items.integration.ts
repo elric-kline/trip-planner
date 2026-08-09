@@ -24,8 +24,9 @@ import { createTestTrip, createTestUser, addTripMember, cleanupTrip } from "./te
 /**
  * Integration coverage for the item lifecycle: creation validation, edit
  * permissions, the idea -> proposed -> locked -> declined state machine, and
- * the side effects that ride along with each transition (RSVPs wiped on
- * unlock, category-specific details orphaned on a category change). The
+ * the side effects that ride along with each transition (support voided when
+ * a required lock displaces a rival, category-specific details orphaned on a
+ * category change). The
  * pure transition rules themselves are already unit-tested in
  * lifecycle.test.ts with no database -- this file checks that items.ts
  * actually enforces them and persists the results correctly, which is the
@@ -130,7 +131,7 @@ test("updateItemDetails deletes lodging_details when the category moves away fro
   assert.equal(after.length, 0, "orphaned lodging details are cleaned up");
 });
 
-test("the idea -> proposed -> locked -> declined -> restored lifecycle persists correctly, and unlock wipes RSVPs", async (t) => {
+test("the idea -> proposed -> locked -> declined -> restored lifecycle persists correctly, and support survives an unlock", async (t) => {
   const { trip, userIds, authorAccess, plannerAccess } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));
 
@@ -158,7 +159,11 @@ test("the idea -> proposed -> locked -> declined -> restored lifecycle persists 
   assert.equal(unlocked.commitment, null);
 
   const rsvpsAfter = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, locked.id));
-  assert.equal(rsvpsAfter.length, 0, "RSVPs are wiped -- they answered a plan that no longer exists");
+  assert.equal(
+    rsvpsAfter.length,
+    1,
+    "support survives an unlock -- it's one answer about one item, not about the lock",
+  );
 
   const declined = await declineItem(authorAccess, unlocked.id);
   assert.equal(declined.status, "declined");
@@ -293,4 +298,95 @@ test("shareItem: a locked private item must be unlocked first", async (t) => {
   const unlocked = await unlockItem(authorAccess, locked.id);
   const shared = await shareItem(authorAccess, unlocked.id);
   assert.equal(shared.visibility, "group");
+});
+
+test("locking as required voids the support on whatever it displaces", async (t) => {
+  const { trip, userIds, authorAccess, bystanderAccess, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  // Two rival proposals for the same afternoon, plus one that doesn't clash.
+  const ruins = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Monte Alban ruins" })).id,
+    new Date("2026-06-06T13:00:00Z"),
+    new Date("2026-06-06T17:00:00Z"),
+  );
+  const waterfall = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Hierve el Agua" })).id,
+    new Date("2026-06-06T14:00:00Z"),
+    new Date("2026-06-06T18:00:00Z"),
+  );
+  const dinner = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Dinner" })).id,
+    new Date("2026-06-06T20:00:00Z"),
+    new Date("2026-06-06T22:00:00Z"),
+  );
+
+  await setRsvp(bystanderAccess, waterfall.id, "yes");
+  await setRsvp(bystanderAccess, dinner.id, "yes");
+
+  await lockItem(plannerAccess, ruins.id, "required");
+
+  const waterfallRsvps = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, waterfall.id));
+  assert.equal(waterfallRsvps.length, 0, "the overlapping rival's support is voided");
+
+  const dinnerRsvps = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, dinner.id));
+  assert.equal(dinnerRsvps.length, 1, "a proposal that doesn't clash is untouched");
+});
+
+test("locking as optional leaves rival support alone", async (t) => {
+  const { trip, userIds, authorAccess, bystanderAccess, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const ruins = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Ruins" })).id,
+    new Date("2026-06-07T13:00:00Z"),
+    new Date("2026-06-07T17:00:00Z"),
+  );
+  const waterfall = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Waterfall" })).id,
+    new Date("2026-06-07T14:00:00Z"),
+    new Date("2026-06-07T18:00:00Z"),
+  );
+  await setRsvp(bystanderAccess, waterfall.id, "yes");
+
+  // Optional doesn't put anyone on the bus, so nothing has been displaced --
+  // both can still be wanted, and the conflict banner is what says so.
+  await lockItem(plannerAccess, ruins.id, "optional");
+
+  const rows = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, waterfall.id));
+  assert.equal(rows.length, 1);
+});
+
+test("a required lock doesn't touch support on an already-locked overlap", async (t) => {
+  const { trip, userIds, authorAccess, bystanderAccess, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const optional = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Optional tour" })).id,
+    new Date("2026-06-08T14:00:00Z"),
+    new Date("2026-06-08T18:00:00Z"),
+  );
+  const lockedOptional = await lockItem(plannerAccess, optional.id, "optional");
+  await setRsvp(bystanderAccess, lockedOptional.id, "yes");
+
+  const clash = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Mandatory briefing" })).id,
+    new Date("2026-06-08T15:00:00Z"),
+    new Date("2026-06-08T16:00:00Z"),
+  );
+  await lockItem(plannerAccess, clash.id, "required");
+
+  const rows = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, lockedOptional.id));
+  assert.equal(
+    rows.length,
+    1,
+    "already-agreed plans keep their answers -- that clash is the conflict banner's job, not a silent void",
+  );
 });

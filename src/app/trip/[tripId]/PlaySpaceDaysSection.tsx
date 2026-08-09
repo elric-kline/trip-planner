@@ -15,11 +15,13 @@ export default function PlaySpaceDaysSection({
   days,
   itemsByDay,
   timezone,
+  supportCounts,
 }: {
   tripId: string;
   days: TripDay[];
   itemsByDay: Map<string, Item[]>;
   timezone: string;
+  supportCounts?: Map<string, number>;
 }) {
   return (
     <div className="space-y-3">
@@ -30,6 +32,7 @@ export default function PlaySpaceDaysSection({
           day={day}
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
+          supportCounts={supportCounts}
         />
       ))}
     </div>
