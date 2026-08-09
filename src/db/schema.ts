@@ -436,10 +436,17 @@ export const lodgingPaymentStatus = pgEnum("lodging_payment_status", [
  * generic polymorphic blob nobody's asked for yet.
  *
  * The item's own `startsAt`/`endsAt` are the group's arrival and departure
- * -- when they actually intend to show up and leave, not a fixed policy -- so
- * a lodging stay slots into the conflict engine and timeline like any other
- * locked item, for free, and travel-time conflicts are judged against when
- * people will really be there.
+ * -- when they actually intend to show up and leave, not a fixed policy.
+ * Unlike every other category, though, a lodging item does NOT occupy the
+ * conflict engine's timeline for its whole span -- staying somewhere for two
+ * days isn't a single-use slot the way a dinner reservation is, so the rest
+ * of a stay coexists freely with everything else. See conflicts.ts's
+ * itemsConflict/analyzeTimeline: lodging only clashes with another lodging
+ * item, or with something landing in a short buffer right at check-in or
+ * check-out, where getting settled in or packed up is what's actually using
+ * the time.
+ *
+ * `earliestCheckIn` is unrelated to that buffer -- see below.
  *
  * `earliestCheckIn` is a different thing entirely: the property's own
  * stated policy (e.g. "check-in from 3:00 PM"), purely informational.

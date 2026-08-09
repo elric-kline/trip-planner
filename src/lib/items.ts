@@ -25,7 +25,7 @@ import {
 import { canEditItem, getItem, type Item, type TripAccess } from "./scope.ts";
 import { getDay, getDayByDate } from "./days.ts";
 import { calendarDateInZone } from "./time.ts";
-import { windowsOverlap } from "./conflicts.ts";
+import { itemsConflict } from "./conflicts.ts";
 
 export class RuleError extends Error {}
 
@@ -323,9 +323,17 @@ export async function unscheduleItem(access: TripAccess, itemId: string): Promis
 
 /**
  * Locking something as *required* puts the whole group on that slot, so every
- * still-open proposal overlapping it has lost -- nobody can attend both. Their
- * "I'm in" answers are answers to a question that's now settled, so they're
- * voided rather than left to imply support for something unattendable.
+ * still-open proposal that genuinely clashes with it has lost -- nobody can
+ * attend both. Their "I'm in" answers are answers to a question that's now
+ * settled, so they're voided rather than left to imply support for something
+ * unattendable.
+ *
+ * "Genuinely clashes" is itemsConflict, not raw windowsOverlap -- locking a
+ * two-day lodging stay as required must not void every dinner reservation
+ * and activity RSVP'd during it, since staying somewhere doesn't stop you
+ * doing anything else while you're there. See conflicts.ts's itemsConflict
+ * for the actual rule (lodging only displaces other lodging, or something
+ * landing in its own arrival/departure buffer).
  *
  * Scoped to items that haven't been locked yet, on purpose. A locked *optional*
  * item that overlaps a newly-required one is a planner problem, not an RSVP
@@ -354,9 +362,9 @@ async function voidRsvpsDisplacedBy(locked: Item): Promise<string[]> {
 
   const displaced = rivals
     .filter((rival) =>
-      windowsOverlap(
-        { startsAt: locked.startsAt!, endsAt: locked.endsAt },
-        { startsAt: rival.startsAt!, endsAt: rival.endsAt },
+      itemsConflict(
+        { startsAt: locked.startsAt!, endsAt: locked.endsAt, category: locked.category },
+        { startsAt: rival.startsAt!, endsAt: rival.endsAt, category: rival.category },
       ),
     )
     .map((rival) => rival.id);
