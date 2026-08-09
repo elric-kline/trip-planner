@@ -224,6 +224,15 @@ export async function* streamAssistantTurn(
     max_tokens: 2048,
     system: systemPrompt,
     tools,
+    // Left unset, Sonnet 5 defaults to "high" -- more depth than a bounded
+    // tool-calling loop (search a place, check a travel time, pin an idea)
+    // ever needs. "medium" is comparably capable to Sonnet 4.6 at "high"
+    // for this kind of scoped lookup, and costs meaningfully less in
+    // latency and tokens on every turn -- worth tuning down explicitly
+    // rather than inheriting whatever the model's own default happens to
+    // be. Thinking itself stays implicit/adaptive; this only turns down
+    // how deep it goes.
+    output_config: { effort: "medium" },
   };
 
   const startedAt = Date.now();
