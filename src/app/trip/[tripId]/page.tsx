@@ -10,6 +10,7 @@ import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { getAssistantHistory } from "@/lib/assistant.ts";
 import { createInviteAction, shareItemAction, setMemberRoleAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
+import { emailDeliveryConfigured } from "@/lib/email.ts";
 import AddItemSheet from "./AddItemSheet.tsx";
 import ShareInviteButton from "./ShareInviteButton.tsx";
 import PeopleSheet from "./PeopleSheet.tsx";
@@ -50,7 +51,7 @@ export default async function TripPage({
   searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string; invite?: string; tab?: string; view?: string }>;
+  searchParams: Promise<{ error?: string; invite?: string; delivery?: string; tab?: string; view?: string }>;
 }) {
   const user = await getCurrentUser();
   const { tripId } = await params;
@@ -64,7 +65,7 @@ export default async function TripPage({
     throw err;
   }
 
-  const { error, invite, tab, view } = await searchParams;
+  const { error, invite, delivery, tab, view } = await searchParams;
   // Plain searchParams-driven tabs, not client state -- linkable/bookmarkable
   // for free, no JS needed. An unrecognized or missing value just falls
   // back to Agreed rather than erroring.
@@ -242,18 +243,32 @@ export default async function TripPage({
           ))}
         </ul>
         {access.isPlanner && (
-          <form
-            action={createInviteAction.bind(null, tripId)}
-            className="flex flex-col gap-2 sm:flex-row"
-          >
-            <input
-              name="email"
-              type="email"
-              placeholder="Invite by email (optional)"
-              className="input"
-            />
-            <button type="submit" className="btn-secondary sm:shrink-0">
-              Create invite link
+          <form action={createInviteAction.bind(null, tripId)} className="grid gap-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-700">Invite someone</span>
+              <input
+                name="email"
+                type="email"
+                placeholder="their@email.com"
+                className="input"
+              />
+              <span className="mt-1 block text-sm text-stone-500">
+                {emailDeliveryConfigured()
+                  ? "We'll email them the invite. Leave it blank for a link you share yourself."
+                  : "No email provider is configured, so the invite is printed to the server console. Leave it blank for a link you share yourself."}
+              </span>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-stone-700">They can</span>
+              {/* Only these two. There is exactly one master planner, it's
+                  whoever made the trip, and it isn't transferable here. */}
+              <select name="role" defaultValue="participant" className="input">
+                <option value="participant">Suggest and vote on ideas</option>
+                <option value="co_planner">Also lock things in (co-planner)</option>
+              </select>
+            </label>
+            <button type="submit" className="btn-secondary justify-self-start">
+              Send invite
             </button>
           </form>
         )}
@@ -265,7 +280,11 @@ export default async function TripPage({
       )}
 
       {invite && (
-        <ShareInviteButton url={`${origin}/invite/${invite}`} tripName={access.trip.name} />
+        <ShareInviteButton
+          url={`${origin}/invite/${invite}`}
+          tripName={access.trip.name}
+          delivery={delivery === "sent" || delivery === "failed" ? delivery : "none"}
+        />
       )}
 
       {findings.length > 0 && (
