@@ -19,13 +19,6 @@ function itemsSummary(items: Item[]): string {
 }
 
 /**
- * A checkbox is ~16px however you style it, so the label around it has to
- * carry the 44px target -- these sat at the label's own 16px line height,
- * which on a phone put two people's names inside one thumb.
- */
-const INCLUDES_LABEL = "flex min-h-11 items-center gap-2 text-sm text-stone-600";
-
-/**
  * The row of member toggles on the "add a location" form -- name="includes",
  * one checkbox per trip member, all checked by default ("default all-in,
  * selectable" -- see schema.ts's tripDayLocationMembers).
@@ -34,7 +27,7 @@ function IncludesCheckboxes({ members }: { members: TripMemberSummary[] }) {
   return (
     <div className="flex flex-wrap gap-x-4">
       {members.map((m) => (
-        <label key={m.userId} className={INCLUDES_LABEL}>
+        <label key={m.userId} className="check-label">
           <input type="checkbox" name="includes" value={m.userId} defaultChecked className="size-4" />
           {displayName(m)}
         </label>
@@ -101,7 +94,7 @@ function LocationRow({
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-x-4">
             {members.map((m) => (
-              <label key={m.userId} className={INCLUDES_LABEL}>
+              <label key={m.userId} className="check-label">
                 <input
                   type="checkbox"
                   name="includes"

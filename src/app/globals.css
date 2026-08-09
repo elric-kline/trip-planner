@@ -81,6 +81,20 @@ body {
 }
 
 /*
+ * The row a checkbox lives in. A checkbox is ~16px however you style it, so
+ * the 44px target has to come from the label around it -- and the label is
+ * what a thumb lands on anyway.
+ *
+ * A class rather than four hand-written copies: this had drifted into four
+ * spellings across profile, the dietary fields, the day-setup sheet and the
+ * transport fields, two of which had picked up min-h-11 and two of which
+ * hadn't. The ones that hadn't were real 20px targets.
+ */
+.check-label {
+  @apply flex min-h-11 items-center gap-2 text-sm text-stone-700;
+}
+
+/*
  * Bottom sheet, built on <dialog> so the top layer, focus trap, Escape-to-close
  * and backdrop all come from the platform rather than from scroll-locking
  * hand-rolled state. Sits against the bottom edge on a phone (thumb reach, and

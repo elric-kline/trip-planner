@@ -419,7 +419,7 @@ export default async function ItemPage({
                   ))}
                 </select>
                 {(transport?.subtype ?? "other") === "flight" ? (
-                  <label className="flex min-h-11 items-center gap-2 text-sm text-stone-700">
+                  <label className="check-label">
                     <input type="checkbox" name="international" defaultChecked={transport?.international ?? false} />
                     International
                   </label>
