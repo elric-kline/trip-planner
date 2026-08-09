@@ -16,7 +16,8 @@ function sseEvent(obj: object): string {
 
 type FakeBlock =
   | { type: "text"; chunks: string[] }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "thinking"; thinking: string; signature: string };
 
 function sseResponse(blocks: FakeBlock[], stopReason: string): Response {
   const frames: string[] = [sseEvent({ type: "message_start", message: { id: "msg_1", role: "assistant", content: [] } })];
@@ -27,13 +28,22 @@ function sseResponse(blocks: FakeBlock[], stopReason: string): Response {
         frames.push(sseEvent({ type: "content_block_delta", index, delta: { type: "text_delta", text: chunk } }));
       }
       frames.push(sseEvent({ type: "content_block_stop", index }));
-    } else {
+    } else if (block.type === "tool_use") {
       frames.push(
         sseEvent({ type: "content_block_start", index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } }),
       );
       frames.push(
         sseEvent({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } }),
       );
+      frames.push(sseEvent({ type: "content_block_stop", index }));
+    } else {
+      // A real thinking block streams the same way text does: an empty
+      // `content_block_start`, the text arriving via its own delta type
+      // (`thinking_delta`, not `text_delta`), then a final `signature_delta`
+      // before the block closes -- see assistant-agent.ts's streamOneRound.
+      frames.push(sseEvent({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "" } }));
+      frames.push(sseEvent({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: block.thinking } }));
+      frames.push(sseEvent({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: block.signature } }));
       frames.push(sseEvent({ type: "content_block_stop", index }));
     }
   });
@@ -172,6 +182,41 @@ test("a custom tool_use is executed and its result fed back as a tool_result bef
   const result = await runAssistantTurn("key", "sys", [], "how far is that?", NO_TOOLS, executors);
   assert.deepEqual(result, { reply: "It's a 12-minute walk." });
   assert.deepEqual(executed, [{ fromLat: 1, fromLng: 2, toLat: 3, toLng: 4 }]);
+});
+
+test("a thinking block alongside a tool_use is echoed back to the next round intact, not stripped to a bare {type}", async (t) => {
+  const executors: ToolExecutors = { estimate_travel: async () => ({ minutes: 12, mode: "walk" }) };
+
+  const fetchMock = t.mock.method(globalThis, "fetch", async (_url: unknown, init: unknown) => {
+    if (fetchMock.mock.calls.length === 0) {
+      return sseResponse(
+        [
+          { type: "thinking", thinking: "Let me check the distance.", signature: "sig_abc123" },
+          { type: "tool_use", id: "call_1", name: "estimate_travel", input: { fromLat: 1, fromLng: 2, toLat: 3, toLng: 4 } },
+        ],
+        "tool_use",
+      );
+    }
+    // This is the exact request Anthropic's production 400 was complaining
+    // about ("messages.1.content.0.thinking.thinking: Field required") --
+    // the assistant turn from round one, echoed back so the tool_result can
+    // be attached, has to still carry the thinking block's real content and
+    // signature rather than the `{ type: "thinking" }` the old catch-all left.
+    const body = JSON.parse((init as RequestInit).body as string);
+    const assistantTurn = body.messages[1];
+    assert.equal(assistantTurn.role, "assistant");
+    assert.deepEqual(assistantTurn.content[0], {
+      type: "thinking",
+      thinking: "Let me check the distance.",
+      signature: "sig_abc123",
+    });
+    assert.equal(assistantTurn.content[1].type, "tool_use");
+    return textResponse("It's a 12-minute walk.");
+  });
+
+  const result = await runAssistantTurn("key", "sys", [], "how far is that?", NO_TOOLS, executors);
+  assert.deepEqual(result, { reply: "It's a 12-minute walk." });
+  assert.equal(fetchMock.mock.calls.length, 2);
 });
 
 test("multiple tool_use blocks in one response are all executed and each gets its own tool_result", async (t) => {

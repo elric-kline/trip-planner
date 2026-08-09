@@ -42,7 +42,19 @@ export type AgentStreamEvent =
   | { type: "error"; message: string };
 
 /** One content block as accumulated across a streamed round's deltas, before being reshaped back into the `content` array format a non-streaming response (and the next round's request) uses. */
-type StreamedBlock = { type: string; text?: string; id?: string; name?: string; inputJson?: string };
+type StreamedBlock = {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  inputJson?: string;
+  /** Extended thinking's own text, streamed in via `thinking_delta` -- see the content_block_delta handling below. */
+  thinking?: string;
+  /** Extended thinking's signature, streamed in via `signature_delta` (arrives as one final delta, not accumulated token-by-token like `thinking` itself, but `+=` is harmless either way). Required verbatim on a `thinking` block that's echoed back next round -- see streamOneRound's own doc comment for why dropping it breaks the very next request. */
+  signature?: string;
+  /** A `redacted_thinking` block's opaque payload -- arrives whole in `content_block_start`, no delta stream of its own. */
+  data?: string;
+};
 
 const MODEL = "claude-sonnet-5";
 const LOG_PREFIX = "[assistant]";
@@ -77,7 +89,8 @@ const MIN_ROUND_TIMEOUT_MS = 8_000;
  * One round's worth of streamed events, reduced down to the same shape a
  * non-streaming response would have had: content blocks in order (text
  * accumulated from its deltas, a tool_use's `input` parsed from its
- * accumulated partial JSON) plus the round's stop_reason. Yields
+ * accumulated partial JSON, a thinking block's `thinking`/`signature`
+ * accumulated the same way) plus the round's stop_reason. Yields
  * `text_delta` as text arrives and `tool_start` the moment a tool_use
  * block's name is known, same contract as streamAssistantTurn itself.
  *
@@ -109,6 +122,9 @@ async function* streamOneRound(
         id: typeof contentBlock.id === "string" ? contentBlock.id : undefined,
         name: typeof contentBlock.name === "string" ? contentBlock.name : undefined,
         inputJson: "",
+        thinking: typeof contentBlock.thinking === "string" ? contentBlock.thinking : "",
+        signature: typeof contentBlock.signature === "string" ? contentBlock.signature : undefined,
+        data: typeof contentBlock.data === "string" ? contentBlock.data : undefined,
       });
       if (type === "tool_use" && typeof contentBlock.name === "string") {
         yield { type: "tool_start", name: contentBlock.name };
@@ -123,6 +139,10 @@ async function* streamOneRound(
         yield { type: "text_delta", text: delta.text };
       } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
         block.inputJson = (block.inputJson ?? "") + delta.partial_json;
+      } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+        block.thinking = (block.thinking ?? "") + delta.thinking;
+      } else if (delta.type === "signature_delta" && typeof delta.signature === "string") {
+        block.signature = (block.signature ?? "") + delta.signature;
       }
     } else if (event.type === "message_delta") {
       const delta = event.delta as Record<string, unknown>;
@@ -144,6 +164,21 @@ async function* streamOneRound(
         return { type: "tool_use", id: block.id, name: block.name, input };
       }
       if (block.type === "text") return { type: "text", text: block.text ?? "" };
+      /*
+       * `thinking` and `redacted_thinking` used to fall into the catch-all
+       * below, which kept only `type` -- fine for a block nobody echoes
+       * back, but a thinking block *is* echoed back (see the tool_use
+       * branch above, which pushes this whole `content` array onto
+       * `messages` unchanged for the next round's request when a tool was
+       * called alongside it). A `{ type: "thinking" }` with no `thinking`
+       * text and no `signature` is exactly the shape Anthropic's own 400
+       * complained about in production: "messages.1.content.0.thinking.
+       * thinking: Field required" -- the signature in particular has to
+       * come back verbatim, unmodified, or the next call is rejected
+       * outright rather than the turn just losing its reasoning trace.
+       */
+      if (block.type === "thinking") return { type: "thinking", thinking: block.thinking ?? "", signature: block.signature ?? "" };
+      if (block.type === "redacted_thinking") return { type: "redacted_thinking", data: block.data ?? "" };
       return { type: block.type }; // server_tool_use and anything else -- passed through as-is
     });
 
