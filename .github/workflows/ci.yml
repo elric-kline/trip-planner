@@ -130,6 +130,49 @@ jobs:
       - run: npm run db:migrate
       - run: npm run test:coverage
 
+  # Route and redirect smoke: the only job that exercises src/app at all. The
+  # coverage job deliberately scopes itself to src/lib, which leaves nine
+  # server-action modules and ~57 redirect() call sites with no automated
+  # signal -- and "where does this land" is exactly the kind of defect that
+  # reached main repeatedly. Runs against a real production build in a real
+  # browser, and asserts only status codes, final URLs, and the absence of
+  # browser errors; see src/smoke/harness.ts for why the vocabulary is that
+  # narrow.
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trip_planner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/trip_planner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # Chromium only -- this layer never opens another engine, and the other
+      # two are most of the download.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate
+      # Its own build rather than `needs: [build]`: sharing .next through
+      # artifacts costs an upload and a download to save one compile, and
+      # leaves the smoke run depending on a job it doesn't otherwise need.
+      - run: npm run build
+      - run: npm run test:smoke
+
   build:
     runs-on: ubuntu-latest
     needs: [typecheck, lint]
