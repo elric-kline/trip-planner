@@ -11,6 +11,7 @@ import { getAssistantHistory } from "@/lib/assistant.ts";
 import { createInviteAction, shareItemAction, setMemberRoleAction } from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemForm from "./AddItemForm.tsx";
+import ShareInviteButton from "./ShareInviteButton.tsx";
 import AgreedDaysSection from "./AgreedDaysSection.tsx";
 import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
 import AssistantChat from "./AssistantChat.tsx";
@@ -148,9 +149,7 @@ export default async function TripPage({
       )}
 
       {invite && (
-        <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Share this link: <code className="break-all">{origin}/invite/{invite}</code>
-        </div>
+        <ShareInviteButton url={`${origin}/invite/${invite}`} tripName={access.trip.name} />
       )}
 
       {findings.length > 0 && (
@@ -197,9 +196,11 @@ export default async function TripPage({
             href={`?tab=${t.id}`}
             aria-current={activeTab === t.id ? "page" : undefined}
             className={
+              // inline-flex + min-h-11: these are the app's primary navigation
+              // and were 38px tall, just under the touch minimum.
               activeTab === t.id
-                ? "border-b-2 border-stone-800 px-3 py-2 text-sm font-medium text-stone-900"
-                : "border-b-2 border-transparent px-3 py-2 text-sm font-medium text-stone-500 hover:text-stone-700"
+                ? "inline-flex min-h-11 items-center border-b-2 border-stone-800 px-3 text-sm font-medium text-stone-900"
+                : "inline-flex min-h-11 items-center border-b-2 border-transparent px-3 text-sm font-medium text-stone-500 hover:text-stone-700"
             }
           >
             {t.label}
@@ -413,7 +414,7 @@ export default async function TripPage({
         {access.isPlanner && (
           <form
             action={createInviteAction.bind(null, tripId)}
-            className="flex gap-2"
+            className="flex flex-col gap-2 sm:flex-row"
           >
             <input
               name="email"
@@ -421,7 +422,7 @@ export default async function TripPage({
               placeholder="Invite by email (optional)"
               className="input"
             />
-            <button type="submit" className="btn-secondary shrink-0">
+            <button type="submit" className="btn-secondary sm:shrink-0">
               Create invite link
             </button>
           </form>

@@ -133,7 +133,7 @@ export default function DiningEditForm({
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid sm:grid-cols-3 gap-3">
         <input
           name="partySize"
           type="number"
@@ -159,7 +159,7 @@ export default function DiningEditForm({
           className="input"
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-2 gap-3">
         <input
           name="confirmationNumber"
           defaultValue={dining?.confirmationNumber ?? ""}

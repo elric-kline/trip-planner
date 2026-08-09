@@ -47,16 +47,33 @@ body {
   @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
 }
 
+/*
+ * 16px type is not a style choice here -- it's the threshold below which iOS
+ * Safari zooms the viewport on focus and never zooms back out. At the old
+ * `text-sm` every field in the app (this class covers inputs, selects and
+ * textareas alike) lurched the page on tap, which on a form-heavy planner
+ * meant most taps. `min-h-11` is the 44px minimum touch target; it only ever
+ * grows a control, so single-line fields land exactly on it and `rows`-sized
+ * textareas keep their own height.
+ */
 .input {
-  @apply w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-route-500 focus:outline-none;
+  @apply min-h-11 w-full rounded-md border border-stone-300 px-3 py-2 text-base focus:border-route-500 focus:outline-none;
 }
 
+/*
+ * inline-flex + min-h-11 rather than vertical padding: padding alone can't
+ * guarantee 44px across the different type sizes these buttons get used at,
+ * and centring the label keeps them looking identical to the old ones at the
+ * sizes where they already cleared it. Both classes are used on `<a>` as well
+ * as `<button>`, which is why the display mode lives here instead of being
+ * left to each caller.
+ */
 .btn-primary {
-  @apply rounded-md bg-route-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-route-700 disabled:opacity-50;
+  @apply inline-flex min-h-11 items-center justify-center rounded-md bg-route-600 px-4 text-sm font-medium text-white hover:bg-route-700 disabled:opacity-50;
 }
 
 .btn-secondary {
-  @apply rounded-md border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50;
+  @apply inline-flex min-h-11 items-center justify-center rounded-md border border-stone-300 px-4 text-sm font-medium text-stone-700 hover:bg-stone-50;
 }
 
 .link {

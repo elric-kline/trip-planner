@@ -133,7 +133,7 @@ export default function AddItemForm({
       {dayId && <input type="hidden" name="dayId" value={dayId} />}
       {afterItemId && <input type="hidden" name="afterItemId" value={afterItemId} />}
       {visibility === "private" && <input type="hidden" name="private" value="on" />}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-2 gap-3">
         <input
           key={`title-${diningPrefill?.version ?? 0}`}
           ref={titleRef}
@@ -188,12 +188,12 @@ export default function AddItemForm({
               what conflict checks use.
             </span>
           </label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             <input name="contactName" placeholder="Contact name (optional)" className="input" />
             <input name="contactPhone" placeholder="Contact phone" className="input" />
             <input name="contactEmail" type="email" placeholder="Contact email" className="input" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
             <select name="bookedBy" defaultValue="" className="input">
               <option value="">Booked under (optional)</option>
@@ -204,7 +204,7 @@ export default function AddItemForm({
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             <select name="paymentStatus" defaultValue="" className="input">
               <option value="">Payment status</option>
               <option value="prepaid">Prepaid</option>
@@ -265,7 +265,7 @@ export default function AddItemForm({
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             <input name="partySize" type="number" min={1} step={1} placeholder="Party size" className="input" />
             <select
               key={`priceRange-${diningPrefill?.version ?? 0}`}
@@ -288,7 +288,7 @@ export default function AddItemForm({
               className="input"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
             <select name="reservedBy" defaultValue="" className="input">
               <option value="">Reserved under (optional)</option>
@@ -319,7 +319,7 @@ export default function AddItemForm({
       {isTransport && (
         <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
           <p className="text-xs font-medium text-stone-500">Transport details</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <select
               name="subtype"
               className="input"
@@ -361,7 +361,7 @@ export default function AddItemForm({
               </p>
             </>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
             <select name="bookedBy" defaultValue="" className="input">
               <option value="">Booked under (optional)</option>
@@ -372,7 +372,7 @@ export default function AddItemForm({
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-2 gap-3">
             <input name="costAmount" type="number" step="any" placeholder="Cost" className="input" />
             <input name="costCurrency" placeholder="USD" className="input" maxLength={8} />
           </div>
@@ -380,7 +380,7 @@ export default function AddItemForm({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-2 gap-3">
         <label className="block text-sm">
           <span className="mb-1 block text-stone-700">{isLodging ? "Arrival (optional)" : "Starts (optional)"}</span>
           <input type="datetime-local" name="startsAt" className="input" />

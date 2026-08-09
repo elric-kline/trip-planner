@@ -14,7 +14,7 @@ export default async function HomePage() {
         Pitch ideas, vote, and lock in an itinerary together — then keep it as a
         shared journal once you&apos;re there.
       </p>
-      <a href="/login" className="btn-primary mt-8 inline-block">
+      <a href="/login" className="btn-primary mt-8">
         Sign in
       </a>
     </div>

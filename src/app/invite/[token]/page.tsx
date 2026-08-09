@@ -30,7 +30,7 @@ export default async function AcceptInvitePage({
       ) : (
         <>
           <p className="mb-4 text-sm text-stone-500">Sign in to accept this invite.</p>
-          <a href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`} className="btn-primary block">
+          <a href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`} className="btn-primary w-full">
             Sign in
           </a>
         </>
