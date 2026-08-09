@@ -12,6 +12,7 @@ import { createInviteAction, shareItemAction, setMemberRoleAction } from "./acti
 import { absoluteOrigin } from "@/lib/url.ts";
 import AddItemSheet from "./AddItemSheet.tsx";
 import ShareInviteButton from "./ShareInviteButton.tsx";
+import PeopleSheet from "./PeopleSheet.tsx";
 import AgreedDaysSection from "./AgreedDaysSection.tsx";
 import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
 import AssistantChat from "./AssistantChat.tsx";
@@ -142,6 +143,98 @@ export default async function TripPage({
         <p className="text-sm text-stone-500">
           {access.trip.destination} · {formatTripDateRange(access.trip.startDate, access.trip.endDate)}
         </p>
+        {/* The roster belongs to the trip, not to whichever tab is open -- it
+            used to render below all three of them. */}
+        <PeopleSheet names={access.members.map((m) => m.name ?? m.email)}>
+        <ul className="mb-4 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
+          {access.members.map((m) => (
+            <li key={m.userId} className="px-4 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span>{m.name ?? m.email}</span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {m.role === "master_planner" && (
+                    <span className="badge bg-amber-100 text-amber-800">Planner</span>
+                  )}
+                  {m.role === "co_planner" && (
+                    <span className="badge bg-amber-50 text-amber-700">Co-planner</span>
+                  )}
+                  {access.isPlanner && m.userId !== access.viewer.id && m.role !== "master_planner" && (
+                    <form
+                      action={setMemberRoleAction.bind(
+                        null,
+                        tripId,
+                        m.userId,
+                        m.role === "co_planner" ? "participant" : "co_planner",
+                      )}
+                    >
+                      <button type="submit" className="text-xs text-stone-400 underline hover:text-stone-700">
+                        {m.role === "co_planner" ? "Revoke" : "Make co-planner"}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+              {(m.dietaryRestrictions?.length || m.dietaryNotes) && (
+                <p className="mt-0.5 text-xs text-stone-500">
+                  🌱{" "}
+                  {[
+                    ...(m.dietaryRestrictions ?? []).map((tag) => DIETARY_TAG_LABEL[tag]),
+                    m.dietaryNotes,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
+              {access.isPlanner &&
+                passportByMember.has(m.userId) &&
+                (() => {
+                  const p = passportByMember.get(m.userId)!;
+                  const bits = [
+                    p.fullName,
+                    p.passportNumber && `#${p.passportNumber}`,
+                    p.nationality,
+                    p.dateOfBirth && `DOB ${p.dateOfBirth}`,
+                    p.expiryDate && `expires ${p.expiryDate}`,
+                  ].filter(Boolean);
+                  return (
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      🛂 {bits.join(" · ")}
+                      {p.hasPhoto && (
+                        <>
+                          {" · "}
+                          <a
+                            href={`/api/trip/${tripId}/members/${m.userId}/passport-photo`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-teal-700 underline"
+                          >
+                            view photo
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
+            </li>
+          ))}
+        </ul>
+        {access.isPlanner && (
+          <form
+            action={createInviteAction.bind(null, tripId)}
+            className="flex flex-col gap-2 sm:flex-row"
+          >
+            <input
+              name="email"
+              type="email"
+              placeholder="Invite by email (optional)"
+              className="input"
+            />
+            <button type="submit" className="btn-secondary sm:shrink-0">
+              Create invite link
+            </button>
+          </form>
+        )}
+        </PeopleSheet>
       </div>
 
       {error && (
@@ -258,7 +351,7 @@ export default async function TripPage({
           />
           {lockedOffCalendar.length > 0 && (
             <Section title="Locked, off the calendar" subtitle="Its date falls outside the trip's own span">
-              <ItemList tripId={tripId} items={lockedOffCalendar} timezone={access.trip.timezone} />
+              <ItemList tripId={tripId} items={lockedOffCalendar} timezone={access.trip.timezone} hideStatus />
             </Section>
           )}
         </div>
@@ -336,96 +429,6 @@ export default async function TripPage({
         </div>
       )}
 
-      <Section title="People">
-        <ul className="mb-3 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
-          {access.members.map((m) => (
-            <li key={m.userId} className="px-4 py-2 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span>{m.name ?? m.email}</span>
-                <div className="flex shrink-0 items-center gap-2">
-                  {m.role === "master_planner" && (
-                    <span className="badge bg-amber-100 text-amber-800">Planner</span>
-                  )}
-                  {m.role === "co_planner" && (
-                    <span className="badge bg-amber-50 text-amber-700">Co-planner</span>
-                  )}
-                  {access.isPlanner && m.userId !== access.viewer.id && m.role !== "master_planner" && (
-                    <form
-                      action={setMemberRoleAction.bind(
-                        null,
-                        tripId,
-                        m.userId,
-                        m.role === "co_planner" ? "participant" : "co_planner",
-                      )}
-                    >
-                      <button type="submit" className="text-xs text-stone-400 underline hover:text-stone-700">
-                        {m.role === "co_planner" ? "Revoke" : "Make co-planner"}
-                      </button>
-                    </form>
-                  )}
-                </div>
-              </div>
-              {(m.dietaryRestrictions?.length || m.dietaryNotes) && (
-                <p className="mt-0.5 text-xs text-stone-500">
-                  🌱{" "}
-                  {[
-                    ...(m.dietaryRestrictions ?? []).map((tag) => DIETARY_TAG_LABEL[tag]),
-                    m.dietaryNotes,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              )}
-              {access.isPlanner &&
-                passportByMember.has(m.userId) &&
-                (() => {
-                  const p = passportByMember.get(m.userId)!;
-                  const bits = [
-                    p.fullName,
-                    p.passportNumber && `#${p.passportNumber}`,
-                    p.nationality,
-                    p.dateOfBirth && `DOB ${p.dateOfBirth}`,
-                    p.expiryDate && `expires ${p.expiryDate}`,
-                  ].filter(Boolean);
-                  return (
-                    <p className="mt-0.5 text-xs text-stone-500">
-                      🛂 {bits.join(" · ")}
-                      {p.hasPhoto && (
-                        <>
-                          {" · "}
-                          <a
-                            href={`/api/trip/${tripId}/members/${m.userId}/passport-photo`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-teal-700 underline"
-                          >
-                            view photo
-                          </a>
-                        </>
-                      )}
-                    </p>
-                  );
-                })()}
-            </li>
-          ))}
-        </ul>
-        {access.isPlanner && (
-          <form
-            action={createInviteAction.bind(null, tripId)}
-            className="flex flex-col gap-2 sm:flex-row"
-          >
-            <input
-              name="email"
-              type="email"
-              placeholder="Invite by email (optional)"
-              className="input"
-            />
-            <button type="submit" className="btn-secondary sm:shrink-0">
-              Create invite link
-            </button>
-          </form>
-        )}
-      </Section>
     </div>
   );
 

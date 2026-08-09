@@ -181,18 +181,18 @@ About a day. Removes dead-ends and unblocks the phone.
 on `trips/new` is fine 2-up, and one transport `grid-cols-2` pairs a select with
 an "International" checkbox label that reads oddly at full width. Review each.
 
-### Tier 2 — Make it flow
+### Tier 2 — Make it flow — **complete**
 
-A sprint. This is the answer to "it doesn't flow naturally through a journey."
+This was the answer to "it doesn't flow naturally through a journey."
 
 | # | Change | Notes |
 |---|---|---|
-| 06 | One summoned add form, not two permanent ones | Bottom-anchored `+ Add` opening a sheet; removes the largest block of repetition and ~⅓ of PlaySpace's scroll depth |
-| 07 | Move booking detail off the add form onto the item page | Add becomes title / category / where / when. The detail forms already exist on the item page |
+| 06 | One summoned add form, not two permanent ones | **Shipped.** PlaySpace on a fresh trip went from ~4,200px to ~1,100px |
+| 07 | Move booking detail off the add form onto the item page | **Shipped.** Six fields left; transport's subtype stays, since it picks the conflict buffer and drives the gap auto-fill |
 | 08 | Item page read view with a single Save | The `<dl>` already rendered for non-editors is the right default for everyone. **Shipped.** Lifecycle actions and a flight's legs stay separate from that Save — see the note below |
-| 09 | Move People and invite into the trip header | Face pile plus *Share invite*; deletes three duplicate renders |
-| 10 | Quiet the day cards | Suppress the summary line while a day is open; drop the redundant `locked` badge inside Agreed |
-| 11 | Day setup opens in a sheet from inside the expanded card | Removes the accidental-tap expander and stops the editor displacing the itinerary |
+| 09 | Move People and invite into the trip header | **Shipped** as a roster summary in the header opening a sheet — the section had grown roles, dietary notes and passport records, which is far too much (and too sensitive) to leave permanently on screen |
+| 10 | Quiet the day cards | **Shipped.** Summary hidden while open, `locked` badge dropped inside Agreed, and an empty day stopped saying "nothing here" twice |
+| 11 | Day setup opens in a sheet from inside the expanded card | **Shipped.** The 20×16px pencil is gone |
 
 **Do not** merge `DayCard` and `PlaySpaceDayCard` into one component. They
 diverge for real reasons — `DayCard` owns the wake/sleep editor and
