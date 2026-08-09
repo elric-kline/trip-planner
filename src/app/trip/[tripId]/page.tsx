@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
+import { displayName, displayNameWithEmail } from "@/lib/display-name.ts";
 import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scope.ts";
 import { PHASE_LABEL } from "@/lib/phase.ts";
 import { conflictsForViewer } from "@/lib/conflicts-for.ts";
@@ -169,12 +170,14 @@ export default async function TripPage({
         <p className="text-sm text-stone-500">Times in {describeTimezone(access.trip.timezone)}</p>
         {/* The roster belongs to the trip, not to whichever tab is open -- it
             used to render below all three of them. */}
-        <PeopleSheet names={access.members.map((m) => m.name ?? m.email)}>
+        <PeopleSheet names={access.members.map((m) => displayName(m))}>
         <ul className="mb-4 divide-y divide-stone-200 rounded-md border border-stone-200 bg-white">
           {access.members.map((m) => (
             <li key={m.userId} className="px-4 py-2 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span>{m.name ?? m.email}</span>
+                {/* The one place the address stays on screen: this is where
+                    roles get handed out, so "which account is that" matters. */}
+                <span className="min-w-0 truncate">{displayNameWithEmail(m)}</span>
                 <div className="flex shrink-0 items-center gap-2">
                   {m.role === "master_planner" && (
                     <span className="badge bg-amber-100 text-amber-800">Planner</span>
@@ -191,7 +194,12 @@ export default async function TripPage({
                         m.role === "co_planner" ? "participant" : "co_planner",
                       )}
                     >
-                      <button type="submit" className="text-xs text-stone-400 underline hover:text-stone-700">
+                      {/* 44px even though it's a text button: a mis-tap in a
+                          list of people changes somebody's permissions. */}
+                      <button
+                        type="submit"
+                        className="inline-flex min-h-11 items-center text-xs text-stone-400 underline hover:text-stone-700"
+                      >
                         {m.role === "co_planner" ? "Revoke" : "Make co-planner"}
                       </button>
                     </form>
@@ -335,7 +343,7 @@ export default async function TripPage({
             {dietaryFindings.map((f, i) => (
               <li key={i}>
                 <strong>{f.itemTitle}</strong> may not work for{" "}
-                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                <strong>{displayName(f.member)}</strong> —{" "}
                 {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
               </li>
             ))}

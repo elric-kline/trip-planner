@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth.ts";
 import { createTrip } from "@/lib/trips.ts";
+import { updateProfile } from "@/lib/profile.ts";
 import { acceptTypedTimezone, timezoneForPlace } from "@/lib/timezone.ts";
 
 /**
@@ -34,6 +35,12 @@ async function resolveTimezone(submitted: string, destination: string): Promise<
 
 export async function createTripAction(formData: FormData): Promise<void> {
   const user = await requireUser();
+
+  // Only present when the creator has no name yet -- see NewTripPage. Saved
+  // before the trip so that a failed create doesn't throw the answer away, and
+  // so "invited by" on the very first invite already reads as a person.
+  const name = String(formData.get("name.self") ?? "").trim();
+  if (name && !user.name?.trim()) await updateProfile(user, { name });
 
   let tripId: string;
   try {

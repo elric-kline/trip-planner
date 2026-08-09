@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import RestaurantSearch, { type PlaceDetails } from "./RestaurantSearch.tsx";
 import CuisineLookupButton, { type CuisineResult } from "./CuisineLookupButton.tsx";
 import { DIETARY_TAGS, DIETARY_TAG_LABEL, type DietaryTag } from "@/lib/dietary.ts";
+import { displayName } from "@/lib/display-name.ts";
 import type { DiningDetails } from "@/lib/dining.ts";
 import type { TripMemberSummary } from "@/lib/scope.ts";
 
@@ -172,7 +173,7 @@ export default function DiningFields({
           <option value="">Reserved under (optional)</option>
           {members.map((m) => (
             <option key={m.userId} value={m.userId}>
-              {m.name ?? m.email}
+              {displayName(m)}
             </option>
           ))}
         </select>

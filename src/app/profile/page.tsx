@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth.ts";
+import { getCurrentUser, hasPassword } from "@/lib/auth.ts";
 import { getProfile } from "@/lib/profile.ts";
 import { getPassportDetails, getPassportPhotoDataUri } from "@/lib/passport.ts";
 import { isEncryptionConfigured } from "@/lib/encryption.ts";
@@ -18,6 +18,7 @@ export default async function ProfilePage({
   const { error, saved } = await searchParams;
   const restrictions = new Set(profile.dietaryRestrictions ?? []);
 
+  const passwordSet = await hasPassword(user.email);
   const passportAvailable = isEncryptionConfigured();
   const passport = passportAvailable ? await getPassportDetails(user.id) : null;
   const photoDataUri = passportAvailable ? await getPassportPhotoDataUri(user.id) : null;
@@ -76,6 +77,22 @@ export default async function ProfilePage({
           Save
         </button>
       </form>
+
+      {/* Signing in never requires a password -- an email link always works --
+          so this is a preference, and it belongs here rather than wedged into
+          the sign-in flow, which is where it used to interrupt every
+          passwordless login. */}
+      <section className="rounded-md border border-stone-200 bg-white p-4">
+        <h2 className="mb-1 text-sm font-semibold text-stone-700">Password (optional)</h2>
+        <p className="mb-3 text-xs text-stone-400">
+          {passwordSet
+            ? "You have one set. An email sign-in link still works either way."
+            : "You don't have one. Signing in emails you a link — set a password only if you'd rather type one."}
+        </p>
+        <a href="/login/set-password?next=/profile" className="btn-secondary">
+          {passwordSet ? "Change password" : "Set a password"}
+        </a>
+      </section>
 
       <section className="rounded-md border border-stone-200 bg-white p-4">
         <h2 className="mb-1 text-sm font-semibold text-stone-700">Passport (optional)</h2>

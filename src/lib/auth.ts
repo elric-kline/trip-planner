@@ -22,6 +22,28 @@ export async function setPassword(userId: string, password: string): Promise<voi
   await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
 }
 
+/**
+ * Whether this address can sign in with a password, used to route the one
+ * email field to the right second step.
+ *
+ * Worth being explicit about the tradeoff: answering this to the browser
+ * reveals that an address has an account *with a password set*. The
+ * alternative -- showing everyone both a password box and a "send me a link"
+ * box and letting them work out which applies -- is what this replaces, and it
+ * asked every user to self-diagnose their own account state. An unknown
+ * address is treated exactly like a known one without a password (send a
+ * link), so the common signal, "does this email have an account here", still
+ * isn't exposed.
+ */
+export async function hasPassword(email: string): Promise<boolean> {
+  const [user] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+    .limit(1);
+  return Boolean(user?.passwordHash);
+}
+
 /** Null on any failure — unknown email, no password set yet, or a wrong one. */
 export async function verifyPasswordLogin(
   email: string,

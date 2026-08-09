@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
+import { displayName } from "@/lib/display-name.ts";
 import { AccessError, canEditItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { attendanceFor, myRsvp } from "@/lib/attendance.ts";
 import { checkDecline, checkPropose, checkRestore, checkRsvp, checkShare, checkUnlock } from "@/lib/lifecycle.ts";
@@ -160,7 +161,7 @@ export default async function ItemPage({
   const longDate = (d: Date) =>
     new Intl.DateTimeFormat("en-US", { timeZone: access.trip.timezone, dateStyle: "medium", timeStyle: "short" }).format(d);
   const memberName = (id: string) =>
-    access.members.find((m) => m.userId === id)?.name ?? access.members.find((m) => m.userId === id)?.email ?? "—";
+    { const m = access.members.find((x) => x.userId === id); return m ? displayName(m) : "—"; };
 
   const startLabel = item.category === "lodging" ? "Arrival" : "Starts";
   const endLabel = item.category === "lodging" ? "Departure (optional)" : "Ends (optional)";
@@ -208,7 +209,7 @@ export default async function ItemPage({
           <ul className="space-y-1">
             {dietaryFindings.map((f, i) => (
               <li key={i}>
-                <strong>{f.member.name ?? f.member.email}</strong> —{" "}
+                <strong>{displayName(f.member)}</strong> —{" "}
                 {f.unmetTags.map((t) => DIETARY_TAG_LABEL[t]).join(", ")}
               </li>
             ))}
@@ -368,7 +369,7 @@ export default async function ItemPage({
                   <option value="">Booked under (optional)</option>
                   {access.members.map((m) => (
                     <option key={m.userId} value={m.userId}>
-                      {m.name ?? m.email}
+                      {displayName(m)}
                     </option>
                   ))}
                 </select>
@@ -441,7 +442,7 @@ export default async function ItemPage({
                   <option value="">Booked under (optional)</option>
                   {access.members.map((m) => (
                     <option key={m.userId} value={m.userId}>
-                      {m.name ?? m.email}
+                      {displayName(m)}
                     </option>
                   ))}
                 </select>
@@ -599,14 +600,14 @@ export default async function ItemPage({
               ) : (
                 <div className="space-y-1 text-sm">
                   <p className="text-stone-600">
-                    Yes: {attendance.attendees.map((m) => m.name ?? m.email).join(", ") || "—"}
+                    Yes: {attendance.attendees.map((m) => displayName(m)).join(", ") || "—"}
                   </p>
                   <p className="text-stone-500">
-                    Awaiting: {attendance.awaiting.map((m) => m.name ?? m.email).join(", ") || "—"}
+                    Awaiting: {attendance.awaiting.map((m) => displayName(m)).join(", ") || "—"}
                   </p>
                   {attendance.declined.length > 0 && (
                     <p className="text-stone-500">
-                      No: {attendance.declined.map((m) => m.name ?? m.email).join(", ")}
+                      No: {attendance.declined.map((m) => displayName(m)).join(", ")}
                     </p>
                   )}
                 </div>
@@ -644,7 +645,7 @@ export default async function ItemPage({
                 {comments.map((c) => (
                   <li key={c.id} className="text-sm">
                     <div className="flex flex-wrap items-center gap-x-3">
-                      <span className="font-medium text-stone-700">{c.authorName ?? c.authorEmail}</span>
+                      <span className="font-medium text-stone-700">{displayName({ name: c.authorName, email: c.authorEmail })}</span>
                       <span className="text-stone-500">{longDate(c.createdAt)}</span>
                       {(c.userId === access.viewer.id || access.isPlanner) && (
                         <form action={deleteCommentAction.bind(null, tripId, itemId, c.id)}>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatCalendarDate } from "@/lib/time.ts";
+import { displayName } from "@/lib/display-name.ts";
 import type { DayLocationKind, TripDay, TripDayLocation } from "@/lib/days.ts";
 import type { Item, TripMemberSummary } from "@/lib/scope.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
@@ -18,17 +19,24 @@ function itemsSummary(items: Item[]): string {
 }
 
 /**
+ * A checkbox is ~16px however you style it, so the label around it has to
+ * carry the 44px target -- these sat at the label's own 16px line height,
+ * which on a phone put two people's names inside one thumb.
+ */
+const INCLUDES_LABEL = "flex min-h-11 items-center gap-2 text-sm text-stone-600";
+
+/**
  * The row of member toggles on the "add a location" form -- name="includes",
  * one checkbox per trip member, all checked by default ("default all-in,
  * selectable" -- see schema.ts's tripDayLocationMembers).
  */
 function IncludesCheckboxes({ members }: { members: TripMemberSummary[] }) {
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1">
+    <div className="flex flex-wrap gap-x-4">
       {members.map((m) => (
-        <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
-          <input type="checkbox" name="includes" value={m.userId} defaultChecked />
-          {m.name ?? m.email}
+        <label key={m.userId} className={INCLUDES_LABEL}>
+          <input type="checkbox" name="includes" value={m.userId} defaultChecked className="size-4" />
+          {displayName(m)}
         </label>
       ))}
     </div>
@@ -61,19 +69,29 @@ function LocationRow({
 }) {
   return (
     <li className="rounded border border-stone-200 bg-white p-2">
-      <div className="flex items-center justify-end gap-1 text-xs">
+      {/* All three carry the 44px minimum: they sit side by side, and the
+          rightmost one deletes. */}
+      <div className="flex items-center justify-end gap-1 text-sm">
         <form action={moveLocationAction.bind(null, tripId, location.id, "up")}>
-          <button type="submit" aria-label="Move earlier" className="px-1 text-stone-400 hover:text-stone-700">
+          <button
+            type="submit"
+            aria-label="Move earlier"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center text-stone-400 hover:text-stone-700"
+          >
             ↑
           </button>
         </form>
         <form action={moveLocationAction.bind(null, tripId, location.id, "down")}>
-          <button type="submit" aria-label="Move later" className="px-1 text-stone-400 hover:text-stone-700">
+          <button
+            type="submit"
+            aria-label="Move later"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center text-stone-400 hover:text-stone-700"
+          >
             ↓
           </button>
         </form>
         <form action={removeLocationAction.bind(null, tripId, location.id)}>
-          <button type="submit" className="px-1 text-red-500 underline">
+          <button type="submit" className="inline-flex min-h-11 items-center px-2 text-red-500 underline">
             Remove
           </button>
         </form>
@@ -81,20 +99,24 @@ function LocationRow({
       <form action={updateLocationAction.bind(null, tripId, location.id)} className="mt-1 space-y-2">
         <AddressAutocomplete name="name" defaultValue={location.name} className="input" restrict="place" />
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <div className="flex flex-wrap gap-x-4">
             {members.map((m) => (
-              <label key={m.userId} className="flex items-center gap-1 text-xs text-stone-600">
+              <label key={m.userId} className={INCLUDES_LABEL}>
                 <input
                   type="checkbox"
                   name="includes"
                   value={m.userId}
                   defaultChecked={includedIds.includes(m.userId)}
+                  className="size-4"
                 />
-                {m.name ?? m.email}
+                {displayName(m)}
               </label>
             ))}
           </div>
-          <button type="submit" className="text-xs text-stone-500 underline hover:text-stone-700">
+          <button
+            type="submit"
+            className="inline-flex min-h-11 items-center text-sm text-stone-500 underline hover:text-stone-700"
+          >
             Save
           </button>
         </div>

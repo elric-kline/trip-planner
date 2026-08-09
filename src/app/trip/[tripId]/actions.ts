@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth.ts";
+import { displayName } from "@/lib/display-name.ts";
 import { requireTripAccess, type Item } from "@/lib/scope.ts";
 import { createInvite, setMemberRole } from "@/lib/trips.ts";
 import {
@@ -577,7 +578,7 @@ export async function createInviteAction(tripId: string, formData: FormData): Pr
     try {
       await sendTripInvite(email, url, {
         tripName: access.trip.name,
-        invitedBy: user.name ?? user.email,
+        invitedBy: displayName(user),
         asCoPlanner,
       });
       delivery = "sent";

@@ -24,6 +24,21 @@ export default async function NewTripPage({
         <Field label="Trip name">
           <input name="name" required placeholder="Oaxaca in October" className="input" />
         </Field>
+        {/* Asked only of somebody who hasn't got a name on file, and only
+            here and on /welcome -- the two moments a person is about to start
+            appearing on other people's screens. The field is `name.self`
+            rather than `name` because the trip's own name already owns that
+            one. */}
+        {!user.name?.trim() && (
+          <Field label="Your name">
+            <input
+              name="name.self"
+              placeholder="What the group should call you"
+              autoComplete="name"
+              className="input"
+            />
+          </Field>
+        )}
         <DestinationTimezone />
         {/* Stays 2-up on mobile: `type=date` renders a short fixed-width value
             (10/10/2026), the two belong together, and stacking them separates a

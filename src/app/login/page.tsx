@@ -1,6 +1,12 @@
-import { requestMagicLink, passwordLogin } from "./actions.ts";
+import { startSignIn } from "./actions.ts";
 import { emailDeliveryConfigured } from "@/lib/email.ts";
 
+/**
+ * One field. The page used to stack a magic-link form and a password form,
+ * divided by "or, if you've set one" -- two identical email boxes, and a
+ * question only the server could actually answer. startSignIn answers it and
+ * routes accordingly.
+ */
 export default async function LoginPage({
   searchParams,
 }: {
@@ -13,46 +19,27 @@ export default async function LoginPage({
       <h1 className="mb-1 text-xl font-semibold">Sign in</h1>
       <p className="mb-6 text-sm text-stone-500">
         {emailDeliveryConfigured()
-          ? "We'll email you a sign-in link — no password needed."
-          : "No email provider is configured, so the sign-in link will be printed to the server console."}
+          ? "New or returning, same box: enter your email and we'll take it from there. No password needed unless you've set one."
+          : "No email provider is configured, so sign-in links are printed to the server console."}
       </p>
 
       {error && (
         <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
 
-      <form action={requestMagicLink} className="space-y-3">
+      <form action={startSignIn} className="space-y-3">
         <input type="hidden" name="next" value={next ?? "/trips"} />
         <input
           type="email"
           name="email"
           required
+          autoFocus
+          autoComplete="email"
           placeholder="you@example.com"
           className="input"
         />
         <button type="submit" className="btn-primary w-full">
-          Send sign-in link
-        </button>
-      </form>
-
-      <div className="my-6 flex items-center gap-3 text-xs text-stone-400">
-        <div className="h-px flex-1 bg-stone-200" />
-        or, if you&apos;ve set one
-        <div className="h-px flex-1 bg-stone-200" />
-      </div>
-
-      <form action={passwordLogin} className="space-y-3">
-        <input type="hidden" name="next" value={next ?? "/trips"} />
-        <input
-          type="email"
-          name="email"
-          required
-          placeholder="you@example.com"
-          className="input"
-        />
-        <input type="password" name="password" required placeholder="Password" className="input" />
-        <button type="submit" className="btn-secondary w-full">
-          Sign in with password
+          Continue
         </button>
       </form>
     </div>

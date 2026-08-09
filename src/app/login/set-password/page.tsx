@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth.ts";
+import { getCurrentUser, hasPassword } from "@/lib/auth.ts";
 import { submitPassword } from "./actions.ts";
 
+/**
+ * No longer interposed between signing in and arriving -- confirmSignIn goes
+ * straight where you were headed. This page is now only reached on purpose,
+ * from Profile, so it can say what it is instead of apologising for
+ * interrupting, and "Skip for now" becomes an ordinary Cancel.
+ */
 export default async function SetPasswordPage({
   searchParams,
 }: {
@@ -11,13 +17,16 @@ export default async function SetPasswordPage({
   if (!user) redirect("/login");
 
   const { error, next } = await searchParams;
+  const existing = await hasPassword(user.email);
 
   return (
     <div className="mx-auto max-w-sm">
-      <h1 className="mb-1 text-xl font-semibold">Create a password</h1>
+      <h1 className="mb-1 text-xl font-semibold">
+        {existing ? "Change your password" : "Set a password"}
+      </h1>
       <p className="mb-6 text-sm text-stone-500">
-        You&apos;re signed in as <strong>{user.email}</strong>. Set a password so you
-        can sign in directly next time, or keep using an email link — whichever&apos;s easier.
+        For <strong>{user.email}</strong>. You never need one — signing in emails you a
+        link — but with a password set you can type it instead.
       </p>
 
       {error && (
@@ -44,12 +53,15 @@ export default async function SetPasswordPage({
           className="input"
         />
         <button type="submit" className="btn-primary w-full">
-          Set password
+          {existing ? "Change password" : "Set password"}
         </button>
       </form>
 
-      <a href={next ?? "/trips"} className="mt-4 block text-center text-sm text-stone-500 underline">
-        Skip for now
+      <a
+        href={next ?? "/trips"}
+        className="mt-2 flex min-h-11 items-center justify-center text-sm text-stone-500 underline"
+      >
+        Cancel
       </a>
     </div>
   );

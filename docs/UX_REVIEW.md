@@ -36,12 +36,25 @@ Severity in brackets. Numbers in parentheses are the plan item that fixes it.
 
 - **[serious]** Sign-in stacks a magic-link form and a password form separated
   by "or, if you've set one", so the user must self-diagnose whether their
-  account has a password. Two identical `you@example.com` fields.
+  account has a password. Two identical `you@example.com` fields. **Fixed:**
+  one email field. The server knows whether that address has a password and
+  routes to `/login/password` or straight to a link, and either step offers the
+  other route. An unknown address behaves exactly like a known one without a
+  password — both get a link — so the split still doesn't disclose who has an
+  account.
 - **[serious]** "Create a password" is wedged between accepting an invite and
   reaching the trip. **[observed]** A member who skips it ends with no password,
-  while the password form stays visible and non-functional for them.
+  while the password form stays visible and non-functional for them. **Fixed:**
+  redeeming a link goes straight where you were headed. Setting a password is a
+  preference, so it lives in Profile now — and the stray non-functional form is
+  gone with the two-form sign-in above.
 - **[polish]** The homepage has one button and no argument — no screenshot, no
-  example, no "got an invite link?" path.
+  example, no "got an invite link?" path. **Fixed:** a sample day rendered from
+  the same markup as the real item rows (two competing proposals, a support
+  count, a clash flag, one locked item) rather than a screenshot that would go
+  stale; three concrete claims underneath it; and an invite-link section that
+  takes a pasted link and sends you to `/invite/[token]`, since most arrivals
+  hold a link rather than an interest in the product.
 
 ### Starting a trip
 
@@ -65,10 +78,20 @@ Severity in brackets. Numbers in parentheses are the plan item that fixes it.
   drag-select across a 32-character token. (05)
 - **[serious]** "Invite by email (optional)" sends no email. What it actually
   does is invisible: the invite becomes scoped to that address, so the link
-  stops working for anyone else. Neither behaviour is stated.
+  stops working for anyone else. Neither behaviour is stated. **Fixed:** it
+  sends the invite link to that address, says so, and reports whether delivery
+  actually succeeded rather than assuming it. Planners and co-planners can also
+  choose to invite somebody as a co-planner.
 - **[polish]** People are raw email addresses everywhere — People list, RSVP
   roll-call, and three times per day card in the location checkboxes. Name is
-  optional and nothing prompts for it on join.
+  optional and nothing prompts for it on join. **Fixed:** one `displayName`
+  helper used at every one of those sites, falling back to a readable form of
+  the address's local part when there's no name, so nothing depends on people
+  filling the field in. A name *is* now asked for, once, at the two moments it
+  obviously matters — right after joining a trip, and while creating one — and
+  only from somebody who hasn't got one, so it can't become a step regulars
+  learn to dismiss. The roster keeps the address alongside the name, since
+  that's where roles get assigned and identity has to be unambiguous.
 
 ### Proposing something
 
@@ -373,10 +396,10 @@ editing or wrongly regain title editing. The layout is the easy half.
 
 ## Status
 
-All three tiers are shipped, plus the destination-timezone fix. What remains
-from the findings list are: the two-form sign-in, the homepage with no
-argument, names instead of email addresses, and the fact that "Invite by
-email" still sends no email.
+All three tiers are shipped, plus the destination-timezone fix, invitations
+that actually send (and can hand out the co-planner role), the single-field
+sign-in, the homepage, and names in place of email addresses. Every finding in
+the list above is now marked fixed or covered by a shipped plan item.
 
 ## Verification
 

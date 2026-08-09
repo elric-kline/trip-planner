@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { assistantMessages } from "@/db/schema";
 import { listItems, type Item, type TripAccess } from "./scope.ts";
+import { displayName } from "./display-name.ts";
 import { rsvpsForItems } from "./attendance.ts";
 import { createItem, RuleError } from "./items.ts";
 import { searchRestaurants, getPlaceDetails } from "./places.ts";
@@ -56,7 +57,7 @@ export async function clearAssistantHistory(access: TripAccess): Promise<void> {
 
 function memberName(access: TripAccess, userId: string): string {
   const member = access.members.find((m) => m.userId === userId);
-  return member?.name ?? member?.email ?? "someone";
+  return member ? displayName(member) : "someone";
 }
 
 function formatItemLine(item: Item, timezone: string): string {
@@ -92,8 +93,8 @@ async function describeLockedGroupItems(access: TripAccess, items: Item[]): Prom
     if (item.commitment === "required") return `${line} (required — everyone attending)`;
 
     const responses = rsvpMap.get(item.id) ?? new Map<string, string>();
-    const attending = access.members.filter((m) => responses.get(m.userId) === "yes").map((m) => m.name ?? m.email);
-    const declined = access.members.filter((m) => responses.get(m.userId) === "no").map((m) => m.name ?? m.email);
+    const attending = access.members.filter((m) => responses.get(m.userId) === "yes").map((m) => displayName(m));
+    const declined = access.members.filter((m) => responses.get(m.userId) === "no").map((m) => displayName(m));
     const bits = [
       attending.length > 0 ? `attending: ${attending.join(", ")}` : null,
       declined.length > 0 ? `not attending: ${declined.join(", ")}` : null,
@@ -190,7 +191,7 @@ async function buildSystemPrompt(access: TripAccess): Promise<string> {
 
   const sections = [
     `You are the trip assistant for "${access.trip.name}" (${access.trip.destination}, ${access.trip.startDate} to ${access.trip.endDate}, timezone ${tz}). You're chatting with ${memberName(access, access.viewer.id)} in their own Scratchpad -- private brainstorming space only they can see.`,
-    `Trip members: ${access.members.map((m) => m.name ?? m.email).join(", ")}.`,
+    `Trip members: ${access.members.map((m) => displayName(m)).join(", ")}.`,
     dayLocationLines.length > 0
       ? `DAY-BY-DAY LOCATIONS (where the group actually wakes up, passes through, and sleeps each night -- this is the real geography to reason from, not just the trip's overall destination above, since a multi-city trip can wake or stop somewhere else entirely on a given day; a "(name, name)" tag means only those people are there, not everyone):\n${dayLocationLines.map((l) => `- ${l}`).join("\n")}`
       : "No day-by-day wake/stop/sleep locations have been entered yet -- the trip's overall destination above is all that's known about where the group is each day.",

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
+import { displayName } from "@/lib/display-name.ts";
 import { AccessError, canLockItem, getItem, requireTripAccess } from "@/lib/scope.ts";
 import { previewLockImpact, type LockPreview } from "@/lib/conflicts-for.ts";
 import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
@@ -25,7 +26,7 @@ function PreviewBody({ preview, commitment }: { preview: LockPreview; commitment
             ? "Nobody has said they're in yet, so there's nothing to check against."
             : "No one on the trip yet."
           : `Checked ${checked.length === 1 ? "1 schedule" : `${checked.length} schedules`}: ${checked
-              .map((m) => m.name ?? m.email)
+              .map((m) => displayName(m))
               .join(", ")}.`}
       </p>
 
@@ -35,7 +36,7 @@ function PreviewBody({ preview, commitment }: { preview: LockPreview; commitment
         <ul className="space-y-2 text-sm">
           {impacts.map((impact) => (
             <li key={impact.member.userId} className="rounded-md bg-amber-50 px-3 py-2 text-amber-900">
-              <strong>{impact.member.name ?? impact.member.email}</strong>
+              <strong>{displayName(impact.member)}</strong>
               <ul className="mt-1 list-disc pl-5">
                 {impact.newFindings.map((f, i) => (
                   <li key={i}>
@@ -58,7 +59,7 @@ function PreviewBody({ preview, commitment }: { preview: LockPreview; commitment
           <ul className="list-disc space-y-0.5 pl-5">
             {blindSpots.map((spot) => (
               <li key={spot.itemId}>
-                {spot.members.map((m) => m.name ?? m.email).join(", ")}{" "}
+                {spot.members.map((m) => displayName(m)).join(", ")}{" "}
                 {spot.members.length === 1 ? "hasn't" : "haven't"} answered{" "}
                 <strong>{spot.title}</strong>, which overlaps this — if that turns into a yes, it clashes.
               </li>

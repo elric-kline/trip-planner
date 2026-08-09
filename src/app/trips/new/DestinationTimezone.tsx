@@ -118,7 +118,7 @@ export default function DestinationTimezone() {
           <button
             type="button"
             onClick={() => setManual(true)}
-            className="underline hover:text-stone-800"
+            className="inline-flex min-h-11 items-center underline hover:text-stone-800"
           >
             Change
           </button>
