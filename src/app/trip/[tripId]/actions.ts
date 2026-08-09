@@ -247,30 +247,6 @@ export async function createItemAction(tripId: string, formData: FormData): Prom
   revalidatePath(`/trip/${tripId}`);
 }
 
-export async function scheduleItemAction(
-  tripId: string,
-  itemId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  const startsAt = localInputToDate(formData.get("startsAt"), access.trip.timezone);
-  if (!startsAt) withError(tripId, new Error("Give the item a start time."));
-
-  try {
-    await scheduleItem(
-      access,
-      itemId,
-      startsAt!,
-      localInputToDate(formData.get("endsAt"), access.trip.timezone),
-    );
-  } catch (err) {
-    withError(tripId, err);
-  }
-  revalidatePath(`/trip/${tripId}`);
-  redirect(`/trip/${tripId}/items/${itemId}`);
-}
-
 export async function unscheduleItemAction(tripId: string, itemId: string): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
@@ -391,92 +367,106 @@ export async function setRsvpAction(
   redirect(`/trip/${tripId}/items/${itemId}`);
 }
 
-export async function updateItemAction(
-  tripId: string,
-  itemId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  const locationName = String(formData.get("locationName") ?? "") || null;
-  // Only re-geocode when a lookup actually succeeds — a failed or skipped
-  // one (address didn't change, or Google couldn't resolve it) shouldn't
-  // wipe out coordinates that were already there.
-  const coords = await geocode(locationName);
-
-  try {
-    await updateItemDetails(access, itemId, {
-      title: String(formData.get("title") ?? ""),
-      notes: String(formData.get("notes") ?? "") || null,
-      category: (formData.get("category") as Item["category"] | "") || undefined,
-      locationName,
-      ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
-    });
-  } catch (err) {
-    withError(tripId, err);
-  }
-  revalidatePath(`/trip/${tripId}`);
-  redirect(`/trip/${tripId}/items/${itemId}`);
+/**
+ * Sends a failed save back to the item the user was editing, rather than to
+ * the trip page. `withError` does the latter, which is right for actions
+ * launched from the trip page but loses the editor's context (and their
+ * unsaved reason for being there) when the failure came from the item's own
+ * form.
+ */
+function withItemError(tripId: string, itemId: string, err: unknown): never {
+  const message = err instanceof RuleError || err instanceof Error ? err.message : "Something went wrong.";
+  redirect(`/trip/${tripId}/items/${itemId}?error=${encodeURIComponent(message)}`);
 }
 
-export async function updateLodgingDetailsAction(
+/**
+ * The item page's single Save.
+ *
+ * That page used to stack three always-open forms with three separate Save
+ * buttons -- the base title/notes editor, the category's booking details, and
+ * the schedule -- with no signal about which button wrote which fields. They
+ * are one form now, and this is what it posts to.
+ *
+ * The `editsBase` / `editsSchedule` / `detailsFor` markers describe the shape
+ * of the form that was rendered, not what the user is allowed to do. They can
+ * only ever narrow what gets written. Every actual permission check stays
+ * where it was -- `updateItemDetails` asks `canEditItem`, `scheduleItem`
+ * enforces `checkPropose`, and each `upsert*Details` gates itself -- so a
+ * hand-forged post can't grant itself anything by flipping a marker.
+ *
+ * `detailsFor` also guards the one genuinely ambiguous case: changing the
+ * category in the same save that submits the *old* category's detail fields.
+ * When the two disagree, the details are dropped rather than written onto an
+ * item that is no longer that kind of thing.
+ */
+export async function saveItemAction(
   tripId: string,
   itemId: string,
   formData: FormData,
 ): Promise<void> {
   const user = await requireUser();
   const access = await requireTripAccess(tripId, user);
-  const lodging = parseLodgingFields(formData, access.trip.timezone);
-  const coords = await geocode(lodging.address);
+
+  const editsBase = formData.get("editsBase") === "1";
+  const detailsFor = String(formData.get("detailsFor") ?? "");
+  // Lodging has no separate "Location" field: its address *is* the item's
+  // location (the page used to ask for both, with two near-identical
+  // explanations of which one geocoding used).
+  const isLodging = detailsFor === "lodging";
 
   try {
-    await upsertLodgingDetails(access, itemId, lodging);
-    // The address is the item's real location for conflict-checking
-    // purposes — keep the item's own locationName/coordinates in sync with
-    // it, same as at creation time.
-    if (lodging.address) {
+    if (editsBase) {
+      const locationName =
+        (isLodging ? String(formData.get("address") ?? "") : String(formData.get("locationName") ?? "")) || null;
+      // Only re-geocode when a lookup actually succeeds -- a failed or skipped
+      // one shouldn't wipe coordinates that were already there.
+      const coords = await geocode(locationName);
       await updateItemDetails(access, itemId, {
-        locationName: lodging.address,
+        title: String(formData.get("title") ?? ""),
+        notes: String(formData.get("notes") ?? "") || null,
+        category: (formData.get("category") as Item["category"] | "") || undefined,
+        locationName,
         ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
       });
     }
+
+    const endsUpAs = editsBase ? String(formData.get("category") ?? "") : detailsFor;
+    if (detailsFor && detailsFor === endsUpAs) {
+      if (isLodging) {
+        const lodging = parseLodgingFields(formData, access.trip.timezone);
+        await upsertLodgingDetails(access, itemId, lodging);
+        // Keep the item's own location in step with the address when the base
+        // section wasn't on the form to do it (a locked item, where a planner
+        // can still correct booking details but not rename the item).
+        if (!editsBase && lodging.address) {
+          const coords = await geocode(lodging.address);
+          await updateItemDetails(access, itemId, {
+            locationName: lodging.address,
+            ...(coords ? { locationLat: coords.lat, locationLng: coords.lng } : {}),
+          });
+        }
+      } else if (detailsFor === "dining") {
+        await upsertDiningDetails(access, itemId, parseDiningFields(formData));
+      } else if (detailsFor === "transport") {
+        await upsertTransportDetails(access, itemId, await withGeocodedDestination(parseTransportFields(formData)));
+      }
+    }
+
+    // A blank start time means "no time given," not "drop the time I had" --
+    // un-scheduling walks an item's status backwards, so it stays an explicit
+    // choice of its own (see unscheduleItemAction).
+    if (formData.get("editsSchedule") === "1") {
+      const startsAt = localInputToDate(formData.get("startsAt"), access.trip.timezone);
+      if (startsAt) {
+        await scheduleItem(access, itemId, startsAt, localInputToDate(formData.get("endsAt"), access.trip.timezone));
+      }
+    }
   } catch (err) {
-    withError(tripId, err);
+    withItemError(tripId, itemId, err);
   }
-  redirect(`/trip/${tripId}/items/${itemId}`);
-}
 
-export async function updateDiningDetailsAction(
-  tripId: string,
-  itemId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  const dining = parseDiningFields(formData);
-
-  try {
-    await upsertDiningDetails(access, itemId, dining);
-  } catch (err) {
-    withError(tripId, err);
-  }
-  redirect(`/trip/${tripId}/items/${itemId}`);
-}
-
-export async function updateTransportDetailsAction(
-  tripId: string,
-  itemId: string,
-  formData: FormData,
-): Promise<void> {
-  const user = await requireUser();
-  const access = await requireTripAccess(tripId, user);
-  const transport = await withGeocodedDestination(parseTransportFields(formData));
-
-  try {
-    await upsertTransportDetails(access, itemId, transport);
-  } catch (err) {
-    withError(tripId, err);
-  }
+  revalidatePath(`/trip/${tripId}`);
+  // No ?edit=1 -- a completed save lands back on the read view.
   redirect(`/trip/${tripId}/items/${itemId}`);
 }
 

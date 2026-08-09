@@ -189,7 +189,7 @@ A sprint. This is the answer to "it doesn't flow naturally through a journey."
 |---|---|---|
 | 06 | One summoned add form, not two permanent ones | Bottom-anchored `+ Add` opening a sheet; removes the largest block of repetition and ~⅓ of PlaySpace's scroll depth |
 | 07 | Move booking detail off the add form onto the item page | Add becomes title / category / where / when. The detail forms already exist on the item page |
-| 08 | Item page read view with a single Save | The `<dl>` already rendered for non-editors is the right default for everyone |
+| 08 | Item page read view with a single Save | The `<dl>` already rendered for non-editors is the right default for everyone. **Shipped.** Lifecycle actions and a flight's legs stay separate from that Save — see the note below |
 | 09 | Move People and invite into the trip header | Face pile plus *Share invite*; deletes three duplicate renders |
 | 10 | Quiet the day cards | Suppress the summary line while a day is open; drop the redundant `locked` badge inside Agreed |
 | 11 | Day setup opens in a sheet from inside the expanded card | Removes the accidental-tap expander and stops the editor displacing the itinerary |
@@ -250,6 +250,36 @@ tests and be unusable.
 for proposals is free and tempting, and silently gives proposals attendees —
 which feeds straight into 13. Reuse-versus-new-table is a real fork. Decide 12
 and 13 together.
+
+### What 08 ended up doing
+
+Read view by default; `?edit=1` renders one form with one Save (`saveItemAction`).
+Two things deliberately stayed outside it:
+
+- **Lifecycle actions** — lock, unlock, decline, restore, delete, RSVP, "move
+  back to ideas". They change what state an item is in, not what it says, and
+  each has its own rule in lifecycle.ts. Folding them in would make a status
+  change a side effect of editing a field.
+- **A flight's legs** — a variable-length set of sub-records whose replace-all
+  write also resyncs the item's own start/end from the first departure and last
+  arrival, so it would fight the schedule fields in the same form, and its
+  per-leg `required` inputs would block saving an item with no legs yet.
+
+The predicted trap was real: moving the lodging address into the shared
+"Basics" section silently took away a planner's ability to correct a **locked**
+stay's address, which the old lodging form always allowed (it was never gated
+on "not locked"). The address is now rendered inside the lodging panel whenever
+the Basics section isn't showing it.
+
+Worth recording for whoever touches this next: `baseEditable`'s "not once
+locked" rule is a UI guardrail, not an authorization boundary. `canEditItem`
+permits a planner to edit a locked item; the page is stricter on purpose, and
+the honest phrasing is "unlock it first."
+
+Removing the old per-section actions also deleted five exported server actions
+(`updateItemAction`, `scheduleItemAction`, and the three `update*DetailsAction`).
+In a `"use server"` file every export is a callable endpoint, so leaving
+unreachable ones around is surface with no upside.
 
 ### Why 08 is riskier than it looks
 
