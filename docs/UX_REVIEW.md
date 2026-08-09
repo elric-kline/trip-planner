@@ -51,7 +51,12 @@ Severity in brackets. Numbers in parentheses are the plan item that fixes it.
   link*, below the fold. (04)
 - **[serious]** `Destination timezone (IANA)` is a required field hardcoded to
   `America/Mexico_City` regardless of destination. Timezone drives the conflict
-  engine, so missing it corrupts every time on the trip.
+  engine, so missing it corrupts every time on the trip. **Fixed:** derived
+  from the destination via the Maps Time Zone API, falling back to the
+  browser's own zone and then to UTC, shown in words with a "change"
+  affordance, and named on the trip page so a wrong one is visible. A typed
+  abbreviation is refused rather than resolved — Intl reads `EST` as
+  `America/Panama`, which never observes DST.
 
 ### Getting the group in
 
@@ -368,10 +373,10 @@ editing or wrongly regain title editing. The layout is the easy half.
 
 ## Status
 
-All three tiers are shipped. What remains from the findings list are the
-items that never had a plan number: the two-form sign-in, the IANA timezone
-field, the homepage, names instead of email addresses, and the fact that
-"Invite by email" still sends no email.
+All three tiers are shipped, plus the destination-timezone fix. What remains
+from the findings list are: the two-form sign-in, the homepage with no
+argument, names instead of email addresses, and the fact that "Invite by
+email" still sends no email.
 
 ## Verification
 

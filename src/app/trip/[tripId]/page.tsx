@@ -18,6 +18,7 @@ import PlaySpaceDaysSection from "./PlaySpaceDaysSection.tsx";
 import AssistantChat from "./AssistantChat.tsx";
 import { ItemList, ItemRow } from "./itemDisplay.tsx";
 import { formatTripDateRange } from "@/lib/time.ts";
+import { describeTimezone } from "@/lib/timezone.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
 import { getPassportDetailsForUsers } from "@/lib/passport.ts";
@@ -161,6 +162,10 @@ export default async function TripPage({
         <p className="text-sm text-stone-500">
           {access.trip.destination} · {formatTripDateRange(access.trip.startDate, access.trip.endDate)}
         </p>
+        {/* The zone every time on this trip is interpreted against. It was
+            invisible once set, so a trip created with the wrong one stayed
+            wrong quietly -- naming it here is what makes that noticeable. */}
+        <p className="text-sm text-stone-500">Times in {describeTimezone(access.trip.timezone)}</p>
         {/* The roster belongs to the trip, not to whichever tab is open -- it
             used to render below all three of them. */}
         <PeopleSheet names={access.members.map((m) => m.name ?? m.email)}>
