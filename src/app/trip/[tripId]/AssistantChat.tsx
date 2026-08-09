@@ -16,6 +16,7 @@ const TOOL_LABEL: Record<string, string> = {
   estimate_travel: "Checking travel time…",
   pin_idea: "Saving that…",
   web_search: "Searching the web…",
+  web_fetch: "Reading the page…",
 };
 
 /** Parses whatever's arrived so far into complete SSE frames, returning the parsed events plus whatever incomplete text is left to prepend to the next chunk. */

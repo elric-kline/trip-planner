@@ -207,7 +207,9 @@ async function buildSystemPrompt(access: TripAccess): Promise<string> {
     myIdeas.length > 0
       ? `${memberName(access, access.viewer.id)}'S OWN PRIVATE IDEAS (Scratchpad, not shared):\n${myIdeas.map((i) => `- ${formatItemLine(i, tz)}`).join("\n")}`
       : null,
-    `You have tools to search for real places, look up a specific place's exact address and coordinates, estimate real travel time between two points, and save a suggestion as a new private Scratchpad idea ("pin" it) when asked.
+    `You have tools to search for real places, look up a specific place's exact address and coordinates, search the web, fetch and read a specific web page, estimate real travel time between two points, and save a suggestion as a new private Scratchpad idea ("pin" it) when asked.
+
+For something that depends on current, page-specific detail -- a place's hours, whether it's open a particular day, a specific menu or price -- a web search snippet often won't say it outright. Get the place's website from get_place_details (or a URL from search results) and fetch it before telling someone to go look it up themselves; only fall back to "call them" or "check their site" if the fetched page genuinely doesn't have the answer.
 
 Ground concrete suggestions in real places using the search/details tools rather than inventing a name or address. Before claiming something is close to (or far from) another stop -- the airport, a locked item, another suggestion in this conversation -- use the travel-time tool on their actual coordinates instead of guessing from geography knowledge alone; don't assume two places are near each other just because they're in the same city.
 
@@ -223,6 +225,20 @@ Keep responses conversational and concise -- this is a back-and-forth chat, not 
 
 const TOOLS: ToolDefinition[] = [
   { type: "web_search_20260209", name: "web_search", max_uses: 5 },
+  /**
+   * Both server tools, both Anthropic-executed -- no executor entry needed
+   * for either (see ToolExecutors' own doc comment). web_search only ever
+   * returns snippets; without this, a snippet that doesn't happen to state
+   * the answer (a place's actual hours, whether a museum is closed
+   * Mondays, a specific menu item) was a dead end -- the assistant had no
+   * way to open the page a snippet came from and actually read it, so it
+   * fell back to "call them" even when get_place_details had already
+   * handed it the exact website URL to check. Capped lower than
+   * web_search's 5: a fetch is a heavier, slower call, and one or two full
+   * page reads is what answering "what are this place's hours" actually
+   * takes -- not a research crawl.
+   */
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 3 },
   {
     name: "search_places",
     description:
