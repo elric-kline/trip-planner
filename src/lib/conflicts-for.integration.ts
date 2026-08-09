@@ -70,6 +70,24 @@ test("conflictsForViewer flags two overlapping required items as a conflict", as
   assert.equal(findings[0].reason, "overlap");
 });
 
+test("conflictsForViewer doesn't flag a multi-day lodging stay against required plans nested comfortably inside it", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const hotel = await createItem(plannerAccess, { title: "Hotel stay", category: "lodging" });
+  await scheduleItem(plannerAccess, hotel.id, new Date("2026-09-05T15:00:00Z"), new Date("2026-09-07T11:00:00Z"));
+  await lockItem(plannerAccess, hotel.id, "required");
+
+  // This is the exact bug report: a two-day stay conflicting with
+  // everything scheduled during it.
+  await lockedRequired(plannerAccess, "Dinner night one", new Date("2026-09-05T20:00:00Z"));
+  await lockedRequired(plannerAccess, "Museum morning two", new Date("2026-09-06T10:00:00Z"));
+  await lockedRequired(plannerAccess, "Dinner night two", new Date("2026-09-06T20:00:00Z"));
+
+  const findings = flagged(await conflictsForViewer(plannerAccess));
+  assert.deepEqual(findings, [], "nothing inside the stay should be flagged against the lodging itself");
+});
+
 test("conflictsForViewer excludes an optional item the viewer hasn't RSVP'd yes to", async (t) => {
   const { trip, userIds, plannerAccess } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));
@@ -588,6 +606,29 @@ test("previewLockImpact names the overlapping items nobody has answered yet", as
     "the member who declined the rival drops out of the caveat",
   );
   assert.ok(!after.blindSpots[0].members.some((m) => m.userId === memberA.id));
+});
+
+test("a candidate lodging stay doesn't produce a blind spot for every unanswered proposal nested inside it", async (t) => {
+  const { trip, userIds, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  // Comfortably nested inside the stay, unanswered -- must not read as a
+  // blind spot just because it falls inside the lodging's raw date range.
+  await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Dinner plan" })).id,
+    new Date("2026-09-13T20:00:00Z"),
+    new Date("2026-09-13T22:00:00Z"),
+  );
+  const hotel = await scheduleItem(
+    plannerAccess,
+    (await createItem(plannerAccess, { title: "Hotel stay", category: "lodging" })).id,
+    new Date("2026-09-13T15:00:00Z"),
+    new Date("2026-09-15T11:00:00Z"),
+  );
+
+  const preview = await previewLockImpact(plannerAccess, hotel, "required");
+  assert.deepEqual(preview.blindSpots, [], "nothing nested inside a lodging stay is a blind spot for it");
 });
 
 test("an overlapping item everyone has answered is not a blind spot", async (t) => {

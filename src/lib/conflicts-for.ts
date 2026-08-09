@@ -1,6 +1,6 @@
 import type { Coordinates, TravelTimeProvider } from "./travel.ts";
 import { HaversineTravelTimeProvider } from "./travel.ts";
-import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, windowsOverlap, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
+import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, itemsConflict, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
 import { rsvpsForItems } from "./attendance.ts";
 import { listItems, type Item, type TripAccess, type TripMemberSummary } from "./scope.ts";
 import { getTransportDetailsForItems, getTransportLegsForItems, type TransportLeg } from "./transport.ts";
@@ -116,6 +116,7 @@ function toScheduleItem(item: Item, windows: Map<string, TransportWindow>): Sche
     // not a transport item, or a transport item with no details saved
     // yet) is stationary, same as before transport destinations existed.
     destinationLocation: window ? window.destinationLocation : location,
+    isLodging: item.category === "lodging",
   };
 }
 
@@ -281,8 +282,8 @@ export async function previewLockImpact(
   const blindSpots: LockBlindSpot[] = [];
   for (const other of existing) {
     if (other.commitment === "required") continue; // already on everyone
-    if (!windowsOverlap({ startsAt: candidate.startsAt, endsAt: candidate.endsAt },
-                        { startsAt: other.startsAt!, endsAt: other.endsAt })) continue;
+    if (!itemsConflict({ startsAt: candidate.startsAt, endsAt: candidate.endsAt, category: candidate.category },
+                        { startsAt: other.startsAt!, endsAt: other.endsAt, category: other.category })) continue;
 
     const undecided = affected.filter((m) => {
       const answer = rsvpMap.get(other.id)?.get(m.userId);

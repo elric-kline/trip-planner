@@ -336,6 +336,55 @@ test("locking as required voids the support on whatever it displaces", async (t)
   assert.equal(dinnerRsvps.length, 1, "a proposal that doesn't clash is untouched");
 });
 
+test("locking a multi-day lodging stay as required does not void support on things nested inside it, only on a real clash", async (t) => {
+  const { trip, userIds, authorAccess, bystanderAccess, plannerAccess } = await setupTrip();
+  t.after(() => cleanupTrip(trip.id, userIds));
+
+  const hotel = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Downtown hotel", category: "lodging" })).id,
+    new Date("2026-06-06T15:00:00Z"),
+    new Date("2026-06-08T11:00:00Z"),
+  );
+  // Comfortably nested inside the stay -- this is the actual bug report:
+  // a two-day lodging booking must not clear out everyone's dinner plans.
+  const dinner = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Dinner" })).id,
+    new Date("2026-06-06T20:00:00Z"),
+    new Date("2026-06-06T22:00:00Z"),
+  );
+  // Right at check-in -- genuinely can't be checked in yet.
+  const rushedTour = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Rushed walking tour" })).id,
+    new Date("2026-06-06T15:10:00Z"),
+    new Date("2026-06-06T16:00:00Z"),
+  );
+  // A second, competing lodging booking that overlaps the stay -- a real clash.
+  const rivalHotel = await scheduleItem(
+    authorAccess,
+    (await createItem(authorAccess, { title: "Rival hotel", category: "lodging" })).id,
+    new Date("2026-06-07T15:00:00Z"),
+    new Date("2026-06-09T11:00:00Z"),
+  );
+
+  await setRsvp(bystanderAccess, dinner.id, "yes");
+  await setRsvp(bystanderAccess, rushedTour.id, "yes");
+  await setRsvp(bystanderAccess, rivalHotel.id, "yes");
+
+  await lockItem(plannerAccess, hotel.id, "required");
+
+  const dinnerRsvps = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, dinner.id));
+  assert.equal(dinnerRsvps.length, 1, "a dinner nested inside the stay is untouched -- staying somewhere doesn't stop you doing anything else");
+
+  const tourRsvps = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, rushedTour.id));
+  assert.equal(tourRsvps.length, 0, "something landing in the check-in buffer is a real clash");
+
+  const rivalRsvps = await db.select().from(itemRsvps).where(eq(itemRsvps.itemId, rivalHotel.id));
+  assert.equal(rivalRsvps.length, 0, "an overlapping second lodging booking is a real clash");
+});
+
 test("locking as optional leaves rival support alone", async (t) => {
   const { trip, userIds, authorAccess, bystanderAccess, plannerAccess } = await setupTrip();
   t.after(() => cleanupTrip(trip.id, userIds));
