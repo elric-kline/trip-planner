@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth.ts";
 import { createTripAction } from "../actions.ts";
+import DestinationTimezone from "./DestinationTimezone.tsx";
 
 export default async function NewTripPage({
   searchParams,
@@ -23,9 +24,7 @@ export default async function NewTripPage({
         <Field label="Trip name">
           <input name="name" required placeholder="Oaxaca in October" className="input" />
         </Field>
-        <Field label="Destination">
-          <input name="destination" required placeholder="Oaxaca, Mexico" className="input" />
-        </Field>
+        <DestinationTimezone />
         {/* Stays 2-up on mobile: `type=date` renders a short fixed-width value
             (10/10/2026), the two belong together, and stacking them separates a
             pair people read as one range. */}
@@ -37,14 +36,6 @@ export default async function NewTripPage({
             <input type="date" name="endDate" required className="input" />
           </Field>
         </div>
-        <Field label="Destination timezone (IANA)">
-          <input
-            name="timezone"
-            required
-            defaultValue="America/Mexico_City"
-            className="input"
-          />
-        </Field>
         <button type="submit" className="btn-primary w-full">
           Create trip
         </button>
