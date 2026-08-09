@@ -80,6 +80,64 @@ body {
   @apply text-route-600 underline decoration-route-200 underline-offset-2 hover:text-route-700 hover:decoration-route-400;
 }
 
+/*
+ * Bottom sheet, built on <dialog> so the top layer, focus trap, Escape-to-close
+ * and backdrop all come from the platform rather than from scroll-locking
+ * hand-rolled state. Sits against the bottom edge on a phone (thumb reach, and
+ * it reads as a sheet rather than a page), and becomes an ordinary centred
+ * modal once there's room for one.
+ */
+.sheet {
+  margin: auto auto 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 88dvh;
+  padding: 0;
+  border: 0;
+  border-radius: 1rem 1rem 0 0;
+  background: var(--color-white);
+  color: inherit;
+  overflow: hidden;
+}
+
+.sheet::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+@media (min-width: 640px) {
+  .sheet {
+    margin: auto;
+    max-width: 36rem;
+    border-radius: 0.75rem;
+  }
+}
+
+/*
+ * Motion is what makes a sheet read as "over" rather than "instead of," so it
+ * earns its keep -- but it's the first thing to drop when the OS asks for less.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet[open] {
+    animation: sheet-rise 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .sheet[open]::backdrop {
+    animation: sheet-fade 240ms ease-out;
+  }
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(2rem);
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+
 /* A dashed "road" rule — a small nod to the automobile half of the name. */
 .road-rule {
   height: 2px;

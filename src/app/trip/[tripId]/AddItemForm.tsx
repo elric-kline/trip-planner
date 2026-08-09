@@ -1,15 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { createItemAction } from "./actions.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
-import RestaurantSearch, { type PlaceDetails } from "./RestaurantSearch.tsx";
-import CuisineLookupButton, { type CuisineResult } from "./CuisineLookupButton.tsx";
-import type { TripMemberSummary } from "@/lib/scope.ts";
-import { DIETARY_TAGS, DIETARY_TAG_LABEL, type DietaryTag } from "@/lib/dietary.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
-const PRICE_RANGES = ["$", "$$", "$$$", "$$$$"] as const;
 const TRANSPORT_SUBTYPES = ["flight", "train", "drive", "rideshare", "other"] as const;
 const TRANSPORT_SUBTYPE_LABEL: Record<(typeof TRANSPORT_SUBTYPES)[number], string> = {
   flight: "Flight",
@@ -19,35 +14,24 @@ const TRANSPORT_SUBTYPE_LABEL: Record<(typeof TRANSPORT_SUBTYPES)[number], strin
   other: "Other",
 };
 
-type DiningPrefill = {
-  version: number;
-  title: string;
-  locationName: string;
-  contactPhone: string;
-  reservationUrl: string;
-  priceRange: "" | (typeof PRICE_RANGES)[number];
-  placeId: string;
-  cuisine: string;
-  accommodates: DietaryTag[];
-};
-
-/** Google's price_level is 0 (free) - 4 (very expensive); 1-4 map onto our $-$$$$ scale, 0/missing stays unset. */
-function priceRangeFromLevel(level: number | null): DiningPrefill["priceRange"] {
-  if (level == null || level < 1 || level > 4) return "";
-  return PRICE_RANGES[level - 1];
-}
-
 /**
- * Extension point: as other categories grow their own structured fields
- * (dining reservation details, transport confirmation numbers, etc.), give
- * them a `<CategoryFields>`-style block below, gated the same way Lodging's
- * is. Category is local component state so the fields can react to the
- * dropdown immediately, before the item even exists.
+ * What it takes to *propose* something: what it is, where, and when.
+ *
+ * Booking paperwork deliberately isn't here. Choosing "Lodging" used to unfold
+ * an address, check-in instructions, three contact fields, a confirmation
+ * number, booked-by, payment status, cost, currency, a cancellation deadline
+ * and a booking URL between you and the Add button -- and Dining and Transport
+ * did the same. Nobody has a confirmation number for a restaurant they're
+ * still suggesting; those are fields for after a decision, and they already
+ * live on the item's own page, which is reachable the moment the item exists.
+ *
+ * Transport's subtype is the exception, and stays. It isn't paperwork: it
+ * picks the buffer the conflict checker widens the item by (see
+ * transport-buffer.ts), and drive/rideshare use the stops on either side of
+ * the gap to fill in where the trip starts and ends.
  */
 export default function AddItemForm({
   tripId,
-  destination,
-  members,
   visibility,
   dayId,
   afterItemId,
@@ -56,15 +40,11 @@ export default function AddItemForm({
   onCancel,
 }: {
   tripId: string;
-  destination: string;
-  members: TripMemberSummary[];
   /**
-   * Which tab this add lands in -- required, not a checkbox, because which
-   * tab you opened the form from already answers the question: PlaySpace's
-   * "add an idea to share" (and a day's own "+ Add," which only ever shows
-   * up inside PlaySpace's timeline) is always "group"; Scratchpad's "add a
-   * private idea" is always "private." A visibility choice embedded in one
-   * shared form stopped making sense once each tab implies its own answer.
+   * Which tab this add lands in -- required, not a checkbox, because where you
+   * opened the form from already answers the question: PlaySpace (and a day's
+   * own "+ Add," which only ever shows up inside PlaySpace's timeline) is
+   * always "group"; Scratchpad is always "private."
    */
   visibility: "private" | "group";
   /** Set when opened from a day's own "+ Add" slot (see DayItemBuilder.tsx) -- omitted for a tab-level add, which creates a dayless item. */
@@ -84,66 +64,23 @@ export default function AddItemForm({
    */
   precedingLocationName?: string | null;
   followingLocationName?: string | null;
-  /** Shown next to Add only for the compact, day-scoped form -- a tab-level form has nothing to collapse back into. */
+  /** Dismisses the sheet this form is rendered in (see AddItemSheet.tsx). */
   onCancel?: () => void;
 }) {
   const [category, setCategory] = useState<Category>("activity");
-  const [diningPrefill, setDiningPrefill] = useState<DiningPrefill | null>(null);
-  const [titleHasValue, setTitleHasValue] = useState(false);
   const [transportSubtype, setTransportSubtype] = useState<(typeof TRANSPORT_SUBTYPES)[number]>("other");
-  const titleRef = useRef<HTMLInputElement>(null);
   const isLodging = category === "lodging";
-  const isDining = category === "dining";
   const isTransport = category === "transport";
   const autoFillsFromGap = isTransport && (transportSubtype === "drive" || transportSubtype === "rideshare");
 
-  function onRestaurantConfirmed(details: PlaceDetails, placeId: string) {
-    setDiningPrefill((prev) => ({
-      version: (prev?.version ?? 0) + 1,
-      title: details.name ?? "",
-      locationName: details.formattedAddress ?? "",
-      contactPhone: details.phone ?? "",
-      reservationUrl: details.website ?? "",
-      priceRange: priceRangeFromLevel(details.priceLevel),
-      placeId,
-      // A new match supersedes any earlier cuisine/dietary guess -- don't
-      // carry stale info from a different restaurant into this one.
-      cuisine: "",
-      accommodates: [],
-    }));
-    setTitleHasValue(Boolean(details.name));
-  }
-
-  function onCuisineResult(result: CuisineResult) {
-    setDiningPrefill((prev) => ({
-      version: (prev?.version ?? 0) + 1,
-      title: prev?.title ?? titleRef.current?.value ?? "",
-      locationName: prev?.locationName ?? "",
-      contactPhone: prev?.contactPhone ?? "",
-      reservationUrl: prev?.reservationUrl ?? "",
-      priceRange: prev?.priceRange ?? "",
-      placeId: prev?.placeId ?? "",
-      cuisine: result.cuisine ?? "",
-      accommodates: result.accommodates,
-    }));
-  }
-
   return (
-    <form action={createItemAction.bind(null, tripId)} className="grid gap-3 rounded-md border border-stone-200 bg-white p-4">
+    <form action={createItemAction.bind(null, tripId)} className="grid gap-3">
       {dayId && <input type="hidden" name="dayId" value={dayId} />}
       {afterItemId && <input type="hidden" name="afterItemId" value={afterItemId} />}
       {visibility === "private" && <input type="hidden" name="private" value="on" />}
-      <div className="grid sm:grid-cols-2 gap-3">
-        <input
-          key={`title-${diningPrefill?.version ?? 0}`}
-          ref={titleRef}
-          name="title"
-          required
-          defaultValue={diningPrefill?.title ?? ""}
-          onChange={(e) => setTitleHasValue(e.target.value.trim().length > 0)}
-          placeholder="Title"
-          className="input col-span-2"
-        />
+
+      <input name="title" required placeholder="Title" className="input" autoFocus />
+      <div className="grid gap-3 sm:grid-cols-2">
         <select
           name="category"
           className="input"
@@ -157,169 +94,22 @@ export default function AddItemForm({
           <option value="other">Other</option>
         </select>
         <AddressAutocomplete
-          key={`location-${diningPrefill?.version ?? 0}-${isTransport ? transportSubtype : ""}`}
+          key={`location-${isTransport ? transportSubtype : ""}`}
           name="locationName"
-          defaultValue={diningPrefill?.locationName ?? (autoFillsFromGap ? (precedingLocationName ?? undefined) : undefined)}
+          defaultValue={autoFillsFromGap ? (precedingLocationName ?? undefined) : undefined}
           placeholder="Location (optional)"
           className="input"
         />
       </div>
-      <p className="text-xs text-stone-400">
-        We&apos;ll look up coordinates from the location automatically — that&apos;s what lets the conflict checker estimate travel time between stops.
+      <p className="-mt-1 text-sm text-stone-500">
+        We&apos;ll look up coordinates from the location automatically — that&apos;s what lets the conflict
+        checker estimate travel time between stops.
       </p>
       <textarea name="notes" placeholder="Notes (optional)" className="input" rows={2} />
 
-      {isLodging && (
-        <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
-          <p className="text-xs font-medium text-stone-500">Lodging details (optional — fill in now or later)</p>
-          <AddressAutocomplete name="address" placeholder="Address" className="input" />
-          <p className="-mt-2 text-xs text-stone-400">Used for both the map and travel-time conflict checks.</p>
-          <textarea
-            name="checkInInstructions"
-            placeholder="Check-in instructions (e.g. lockbox code, self check-in)"
-            className="input"
-            rows={2}
-          />
-          <label className="text-sm">
-            <span className="mb-1 block text-stone-700">Earliest check-in (optional)</span>
-            <input type="datetime-local" name="earliestCheckIn" className="input" />
-            <span className="mt-1 block text-xs text-stone-400">
-              The property&apos;s own policy, e.g. front desk opens at 3 PM -- just informational. Arrival below is
-              what conflict checks use.
-            </span>
-          </label>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <input name="contactName" placeholder="Contact name (optional)" className="input" />
-            <input name="contactPhone" placeholder="Contact phone" className="input" />
-            <input name="contactEmail" type="email" placeholder="Contact email" className="input" />
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
-            <select name="bookedBy" defaultValue="" className="input">
-              <option value="">Booked under (optional)</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name ?? m.email}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <select name="paymentStatus" defaultValue="" className="input">
-              <option value="">Payment status</option>
-              <option value="prepaid">Prepaid</option>
-              <option value="partial">Partially paid</option>
-              <option value="pay_on_arrival">Pay on arrival</option>
-            </select>
-            <input name="costAmount" type="number" step="any" placeholder="Cost" className="input" />
-            <input name="costCurrency" placeholder="USD" className="input" maxLength={8} />
-          </div>
-          <label className="text-sm">
-            <span className="mb-1 block text-stone-700">Cancel by (optional)</span>
-            <input type="datetime-local" name="cancellationDeadline" className="input" />
-          </label>
-          <input name="bookingUrl" type="url" placeholder="Booking link (optional)" className="input" />
-        </div>
-      )}
-
-      {isDining && (
-        <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
-          <p className="text-xs font-medium text-stone-500">Dining details (optional — fill in now or later)</p>
-          <RestaurantSearch destination={destination} onConfirm={onRestaurantConfirmed} />
-          <p className="-mt-2 text-xs text-stone-400">
-            Confirming a match fills in the title, location, phone, price, and reservation link below — review
-            and adjust before saving.
-          </p>
-          <input
-            key={`placeId-${diningPrefill?.version ?? 0}`}
-            type="hidden"
-            name="placeId"
-            defaultValue={diningPrefill?.placeId ?? ""}
-          />
-          <CuisineLookupButton
-            nameRef={titleRef}
-            address={diningPrefill?.locationName ?? null}
-            disabled={!titleHasValue}
-            onResult={onCuisineResult}
-          />
-          <input
-            key={`cuisine-${diningPrefill?.version ?? 0}`}
-            name="cuisine"
-            defaultValue={diningPrefill?.cuisine ?? ""}
-            placeholder="Cuisine (e.g. Neapolitan pizza)"
-            className="input"
-          />
-          <div key={`accommodates-${diningPrefill?.version ?? 0}`}>
-            <p className="mb-1 text-xs text-stone-500">Accommodates</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-              {DIETARY_TAGS.map((tag) => (
-                <label key={tag} className="flex items-center gap-2 text-sm text-stone-700">
-                  <input
-                    type="checkbox"
-                    name="accommodates"
-                    value={tag}
-                    defaultChecked={diningPrefill?.accommodates?.includes(tag) ?? false}
-                  />
-                  {DIETARY_TAG_LABEL[tag]}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <input name="partySize" type="number" min={1} step={1} placeholder="Party size" className="input" />
-            <select
-              key={`priceRange-${diningPrefill?.version ?? 0}`}
-              name="priceRange"
-              defaultValue={diningPrefill?.priceRange ?? ""}
-              className="input"
-            >
-              <option value="">Price</option>
-              {PRICE_RANGES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <input
-              key={`contactPhone-${diningPrefill?.version ?? 0}`}
-              name="contactPhone"
-              defaultValue={diningPrefill?.contactPhone ?? ""}
-              placeholder="Restaurant phone"
-              className="input"
-            />
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
-            <select name="reservedBy" defaultValue="" className="input">
-              <option value="">Reserved under (optional)</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name ?? m.email}
-                </option>
-              ))}
-            </select>
-          </div>
-          <input
-            key={`reservationUrl-${diningPrefill?.version ?? 0}`}
-            name="reservationUrl"
-            type="url"
-            defaultValue={diningPrefill?.reservationUrl ?? ""}
-            placeholder="Reservation link (optional)"
-            className="input"
-          />
-          <textarea
-            name="specialRequests"
-            placeholder="Special requests (optional) — high chair, occasion, etc."
-            className="input"
-            rows={2}
-          />
-        </div>
-      )}
-
       {isTransport && (
         <div className="grid gap-3 rounded-md border border-stone-100 bg-stone-50 p-3">
-          <p className="text-xs font-medium text-stone-500">Transport details</p>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <select
               name="subtype"
               className="input"
@@ -333,18 +123,12 @@ export default function AddItemForm({
               ))}
             </select>
             {transportSubtype === "flight" && (
-              <label className="flex items-center gap-2 text-sm text-stone-700">
+              <label className="flex min-h-11 items-center gap-2 text-sm text-stone-700">
                 <input type="checkbox" name="international" />
                 International
               </label>
             )}
           </div>
-          {transportSubtype === "flight" && (
-            <p className="-mt-1 text-xs text-stone-400">
-              Flight numbers and connections (for a multi-leg itinerary) can be added on the item&apos;s own page
-              once it&apos;s created.
-            </p>
-          )}
           {transportSubtype !== "flight" && (
             <>
               <AddressAutocomplete
@@ -354,33 +138,17 @@ export default function AddItemForm({
                 placeholder="Destination (optional)"
                 className="input"
               />
-              <p className="-mt-2 text-xs text-stone-400">
+              <p className="-mt-2 text-sm text-stone-500">
                 {autoFillsFromGap
                   ? "Filled in from the stops on either side of this gap — adjust if this isn't a direct trip between them."
                   : "Where this trip ends up, if different from Location — lets the conflict checker estimate travel from here, not from where it started."}
               </p>
             </>
           )}
-          <div className="grid sm:grid-cols-2 gap-3">
-            <input name="confirmationNumber" placeholder="Confirmation number" className="input" />
-            <select name="bookedBy" defaultValue="" className="input">
-              <option value="">Booked under (optional)</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name ?? m.email}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <input name="costAmount" type="number" step="any" placeholder="Cost" className="input" />
-            <input name="costCurrency" placeholder="USD" className="input" maxLength={8} />
-          </div>
-          <input name="bookingUrl" type="url" placeholder="Booking link (optional)" className="input" />
         </div>
       )}
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="mb-1 block text-stone-700">{isLodging ? "Arrival (optional)" : "Starts (optional)"}</span>
           <input type="datetime-local" name="startsAt" className="input" />
@@ -390,18 +158,22 @@ export default function AddItemForm({
           <input type="datetime-local" name="endsAt" className="input" />
         </label>
       </div>
-      {isLodging && (
-        <p className="-mt-2 text-xs text-stone-400">
-          When you actually plan to show up and leave -- this is what travel-time conflict checks use, not the
-          property&apos;s check-in policy above.
-        </p>
-      )}
-      <div className="flex items-center gap-3">
-        <button type="submit" className="btn-primary justify-self-start">
+
+      <p className="-mt-1 text-sm text-stone-500">
+        Booking details — confirmation numbers, cost, check-in instructions — go on the item&apos;s own page
+        once it exists.
+      </p>
+
+      <div className="mt-1 flex items-center gap-3">
+        <button type="submit" className="btn-primary">
           Add
         </button>
         {onCancel && (
-          <button type="button" onClick={onCancel} className="text-sm text-stone-500 hover:text-stone-700">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex min-h-11 items-center text-sm text-stone-500 hover:text-stone-700"
+          >
             Cancel
           </button>
         )}
