@@ -58,8 +58,30 @@ type StreamedBlock = {
 
 const MODEL = "claude-sonnet-5";
 const LOG_PREFIX = "[assistant]";
-/** A round-trip per tool call, plus the final reply -- generous enough for "search, look up details, check travel time, pin two ideas" in one turn without looping forever on a confused chain. In practice OVERALL_BUDGET_MS below is almost always what cuts a long chain short first. */
+/**
+ * A round-trip per *decision* -- a `tool_use` stop, where the model chose
+ * to call one of our own tools and is now waiting on a result -- generous
+ * enough for "search, look up details, check travel time, pin two ideas"
+ * in one turn without looping forever on a confused chain. Does NOT count
+ * `pause_turn` resumes; see MAX_PAUSE_RESUMES below for why those are
+ * budgeted separately. In practice OVERALL_BUDGET_MS below is almost
+ * always what cuts a long chain short first.
+ */
 const MAX_ROUNDS = 8;
+/**
+ * A separate, more generous cap on `pause_turn` resumes -- Anthropic
+ * finishing a server tool call it already started (web_search, or
+ * web_fetch's own dynamic-filtering pass over a page -- see assistant.ts's
+ * TOOLS), not a new decision point for the model. Anthropic's own default
+ * ceiling on a single turn's server-tool iterations is 10, so one slow
+ * fetch can legitimately pause_turn several times over on its own. Before
+ * this was split out, those resumes counted against MAX_ROUNDS the same
+ * as a real tool_use round -- which is exactly what started firing "That
+ * took more back-and-forth than expected" once web_fetch shipped: one
+ * still-resolving page fetch could burn most or all of the 8-round budget
+ * before the model got a real turn to decide anything.
+ */
+const MAX_PAUSE_RESUMES = 12;
 /**
  * A hard wall-clock budget for the *whole* turn, not just one round --
  * comfortably under the ~60s default read/proxy timeout common to reverse
@@ -189,12 +211,14 @@ async function* streamOneRound(
  * Runs one user turn to completion, streaming as it goes: sends
  * `userMessage` (with `history` as prior context) to Claude, yielding
  * `text_delta`s as the reply is written and `tool_start`s as tools are
- * called -- server tools like web_search resume on their own (see the
- * pause_turn branch, same pattern as cuisine-inference.ts's single-tool
- * version, just looped and streamed); custom tools call into `executors`
- * and their result is handed back -- until a final `done`/`error` event,
- * once the model produces a final text reply, the round budget runs out,
- * or the overall time budget runs out (see OVERALL_BUDGET_MS above).
+ * called -- server tools like web_search/web_fetch resume on their own
+ * (see the pause_turn branch, same pattern as cuisine-inference.ts's
+ * single-tool version, just looped and streamed, budgeted separately via
+ * MAX_PAUSE_RESUMES from the MAX_ROUNDS a genuine tool_use decision
+ * costs); custom tools call into `executors` and their result is handed
+ * back -- until a final `done`/`error` event, once the model produces a
+ * final text reply, either round budget runs out, or the overall time
+ * budget runs out (see OVERALL_BUDGET_MS above).
  *
  * `history` is plain prior turns, not the raw tool-call blocks a previous
  * turn's own loop produced -- see schema.ts's assistantMessages doc for why
@@ -236,7 +260,9 @@ export async function* streamAssistantTurn(
   };
 
   const startedAt = Date.now();
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  let toolRounds = 0;
+  let pauseResumes = 0;
+  while (true) {
     const remaining = budgetMs - (Date.now() - startedAt);
     if (remaining < MIN_ROUND_TIMEOUT_MS) {
       yield { type: "error", message: "That's taking longer than expected — try asking again, maybe more specifically." };
@@ -265,14 +291,27 @@ export async function* streamAssistantTurn(
     }
 
     if (stopReason === "pause_turn") {
-      // A server tool (web_search) is still working -- Anthropic resumes it
+      // A server tool (web_search, or web_fetch's own dynamic-filtering
+      // pass over a page) is still working -- Anthropic resumes it
       // automatically once the prior assistant turn (including its
       // server_tool_use block) is sent back; no tool_result needed here.
+      // Budgeted separately from tool_use rounds below -- see
+      // MAX_PAUSE_RESUMES' own doc comment for why.
+      pauseResumes++;
+      if (pauseResumes > MAX_PAUSE_RESUMES) {
+        yield { type: "error", message: "That's taking longer than expected — try asking again, maybe more specifically." };
+        return;
+      }
       messages.push({ role: "assistant", content });
       continue;
     }
 
     if (stopReason === "tool_use") {
+      toolRounds++;
+      if (toolRounds > MAX_ROUNDS) {
+        yield { type: "error", message: "That took more back-and-forth than expected — try asking again, maybe more specifically." };
+        return;
+      }
       messages.push({ role: "assistant", content });
       const toolResults = await Promise.all(
         content
@@ -307,8 +346,6 @@ export async function* streamAssistantTurn(
     yield { type: "done", reply: text || "I don't have anything to add there." };
     return;
   }
-
-  yield { type: "error", message: "That took more back-and-forth than expected — try asking again, maybe more specifically." };
 }
 
 /**
