@@ -26,25 +26,27 @@ function priceRangeFromLevel(level: number | null): Prefill["priceRange"] {
 }
 
 /**
- * The edit-side counterpart to AddItemForm's dining block — same
- * search-and-confirm (Places) then look-up (Claude web search) flow,
- * previously only available at creation time. Extracted into its own
- * component because it needs the same key-remount prefill trick and local
- * state that made AddItemForm's version too tangled to keep inline on the
- * item detail page (a Server Component).
+ * A dining item's own fields, for the item page's edit view: the
+ * search-and-confirm (Places) then look-up (Claude web search) flow, plus the
+ * reservation details it fills in. Its own component because it needs local
+ * state and the key-remount prefill trick, which a Server Component can't do.
  *
- * The item's title (for the cuisine lookup query) isn't part of this form —
- * it lives in the separate "Edit" section below — so it's passed in as a
- * prop rather than read off a ref the way AddItemForm does it.
+ * Renders *fields only*, no `<form>` and no submit button -- it's one section
+ * of the item page's single form, which has one Save for the whole item (see
+ * saveItemAction). It used to own a form and a "Save dining details" button of
+ * its own, one of three on that page, with nothing to say which button wrote
+ * which fields.
+ *
+ * The item's title (for the cuisine lookup query) is passed in rather than
+ * read off a ref, since the title input lives in a different section of the
+ * same form.
  */
-export default function DiningEditForm({
-  action,
+export default function DiningFields({
   itemTitle,
   destination,
   dining,
   members,
 }: {
-  action: (formData: FormData) => void;
   itemTitle: string;
   destination: string;
   dining: DiningDetails | null;
@@ -91,7 +93,7 @@ export default function DiningEditForm({
   const version = prefill?.version ?? 0;
 
   return (
-    <form action={action} className="grid gap-3">
+    <div className="grid gap-3">
       <div className="grid gap-2 rounded-md border border-stone-100 bg-stone-50 p-3">
         <p className="text-xs font-medium text-stone-500">Re-search to refresh details from Google/AI (optional)</p>
         <RestaurantSearch destination={destination} onConfirm={onRestaurantConfirmed} />
@@ -190,7 +192,6 @@ export default function DiningEditForm({
         className="input"
         rows={2}
       />
-      <button className="btn-secondary justify-self-start">Save dining details</button>
-    </form>
+    </div>
   );
 }
