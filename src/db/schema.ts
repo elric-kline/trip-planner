@@ -396,6 +396,52 @@ export const itemRsvps = pgTable(
   ],
 );
 
+export const scheduleFindingReason = pgEnum("schedule_finding_reason", ["overlap", "travel", "no-location"]);
+export const scheduleFindingSeverity = pgEnum("schedule_finding_severity", ["tight", "conflict"]);
+
+/**
+ * One viewer's decision that a specific tight-or-conflicting timeline
+ * finding is fine as-is -- see lib/conflicts.ts's FindingRef/findingKey for
+ * what identifies "this finding" and finding-dismissals.ts for the CRUD.
+ *
+ * Per-user, not per-trip, same reasoning as itemRsvps: conflict analysis is
+ * already computed per-viewer (see conflicts-for.ts's conflictsForViewer),
+ * so "I've looked at this and it's fine" is a statement about *my* schedule,
+ * not a decision binding on anyone else attending the same two items.
+ *
+ * Keyed on the finding's own identity rather than a surrogate id -- a
+ * finding is never itself stored (it's recomputed fresh on every page
+ * load), so there's nothing else to look one up by. reason/severity are
+ * part of the key alongside the two items: if the schedule changes enough
+ * that a dismissed "tight" gap becomes an outright "conflict," that's a
+ * different finding, and the dismissal shouldn't silently carry over to it.
+ *
+ * FKs cascade from both items: once either one is gone, the pairing this
+ * dismissal was about no longer exists, so there's nothing left to have an
+ * opinion on.
+ */
+export const timelineFindingDismissals = pgTable(
+  "timeline_finding_dismissals",
+  {
+    beforeItemId: uuid("before_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    afterItemId: uuid("after_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    reason: scheduleFindingReason("reason").notNull(),
+    severity: scheduleFindingSeverity("severity").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.beforeItemId, t.afterItemId, t.reason, t.severity, t.userId] }),
+    index("timeline_finding_dismissals_user_idx").on(t.userId),
+  ],
+);
+
 /**
  * Discussion, one thread per item. Kept on the item rather than on the trip
  * so it survives the idea -> proposal -> locked promotion: the reason a place

@@ -300,5 +300,41 @@ export async function analyzeTimeline(
   return findings;
 }
 
-export const flagged = (findings: ScheduleFinding[]) =>
-  findings.filter((f) => f.severity !== "ok");
+/** The reason values a ScheduleFinding can carry -- named so callers past this file (dismissal, the UI) don't have to repeat the inline union. */
+export type FindingReason = ScheduleFinding["reason"];
+
+/** Severities flagged() actually returns -- "ok" is filtered out there, so it's never something to accept or dismiss. */
+export type FlaggedSeverity = Exclude<Severity, "ok">;
+
+export type FlaggedFinding = ScheduleFinding & { severity: FlaggedSeverity };
+
+export const flagged = (findings: ScheduleFinding[]): FlaggedFinding[] =>
+  findings.filter((f): f is FlaggedFinding => f.severity !== "ok");
+
+/**
+ * A finding's identity apart from the travel-time numbers behind it -- the
+ * two items, why they clash, and how bad. ScheduleFinding itself is never
+ * persisted (analyzeTimeline recomputes it fresh on every page load), so
+ * this is what a dismissal is actually keyed on and compared against -- see
+ * finding-dismissals.ts and db/schema.ts's timelineFindingDismissals.
+ *
+ * Severity is part of the identity on purpose: if the underlying schedule
+ * changes enough that a dismissed "tight" gap becomes an outright
+ * "conflict" (or the reverse), that's a materially different finding, and a
+ * stale dismissal shouldn't silently carry over and hide it.
+ */
+export type FindingRef = {
+  beforeItemId: string;
+  afterItemId: string;
+  reason: FindingReason;
+  severity: FlaggedSeverity;
+};
+
+export function findingRef(f: FlaggedFinding): FindingRef {
+  return { beforeItemId: f.before.id, afterItemId: f.after.id, reason: f.reason, severity: f.severity };
+}
+
+/** One string for a FindingRef -- what dismissals are actually keyed and compared by. */
+export function findingKey(ref: FindingRef): string {
+  return [ref.beforeItemId, ref.afterItemId, ref.reason, ref.severity].join(":");
+}
