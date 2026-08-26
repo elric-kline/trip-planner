@@ -492,6 +492,8 @@ export default async function TripPage({
             days={days}
             itemsByDay={inPlayByDay}
             timezone={access.trip.timezone}
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
             supportCounts={supportCounts}
             conflictedItemIds={conflictedItemIds}
           />
@@ -522,6 +524,9 @@ export default async function TripPage({
             key={`group-${inPlay.length}`}
             tripId={tripId}
             visibility="group"
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
+            timezone={access.trip.timezone}
             trigger="floating"
             label="Add an idea"
           />
@@ -554,6 +559,9 @@ export default async function TripPage({
             key={`private-${scratchpad.length}`}
             tripId={tripId}
             visibility="private"
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
+            timezone={access.trip.timezone}
             trigger="floating"
             label="Add a private idea"
           />

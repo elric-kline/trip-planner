@@ -301,6 +301,8 @@ export default async function ItemPage({
                     type="datetime-local"
                     name="startsAt"
                     defaultValue={item.startsAt ? zoned(item.startsAt) : ""}
+                    min={`${access.trip.startDate}T00:00`}
+                    max={`${access.trip.endDate}T23:59`}
                     className="input"
                   />
                 </label>
@@ -310,6 +312,8 @@ export default async function ItemPage({
                     type="datetime-local"
                     name="endsAt"
                     defaultValue={item.endsAt ? zoned(item.endsAt) : ""}
+                    min={`${access.trip.startDate}T00:00`}
+                    max={`${access.trip.endDate}T23:59`}
                     className="input"
                   />
                 </label>
