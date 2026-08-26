@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Sheet from "./Sheet.tsx";
 import AddItemForm from "./AddItemForm.tsx";
+import type { TimedInterval } from "@/lib/suggest-time.ts";
 
 /**
  * The one way to add something, in all three places it can be done: the
@@ -23,6 +24,11 @@ export default function AddItemSheet({
   tripId,
   visibility,
   dayId,
+  dayDate,
+  lockedTimes,
+  tripStartDate,
+  tripEndDate,
+  timezone,
   afterItemId,
   precedingLocationName,
   followingLocationName,
@@ -32,6 +38,12 @@ export default function AddItemSheet({
   tripId: string;
   visibility: "private" | "group";
   dayId?: string;
+  /** See AddItemForm.tsx -- forwarded straight through. */
+  dayDate?: string;
+  lockedTimes?: TimedInterval[];
+  tripStartDate: string;
+  tripEndDate: string;
+  timezone: string;
   afterItemId?: string;
   precedingLocationName?: string | null;
   followingLocationName?: string | null;
@@ -71,6 +83,11 @@ export default function AddItemSheet({
           tripId={tripId}
           visibility={visibility}
           dayId={dayId}
+          dayDate={dayDate}
+          lockedTimes={lockedTimes}
+          tripStartDate={tripStartDate}
+          tripEndDate={tripEndDate}
+          timezone={timezone}
           afterItemId={afterItemId}
           precedingLocationName={precedingLocationName}
           followingLocationName={followingLocationName}

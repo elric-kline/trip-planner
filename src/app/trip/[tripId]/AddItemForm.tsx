@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createItemAction } from "./actions.ts";
 import AddressAutocomplete from "./AddressAutocomplete.tsx";
+import { suggestStartTime, type TimedInterval } from "@/lib/suggest-time.ts";
 
 type Category = "lodging" | "dining" | "activity" | "transport" | "other";
 const TRANSPORT_SUBTYPES = ["flight", "train", "drive", "rideshare", "other"] as const;
@@ -34,6 +35,11 @@ export default function AddItemForm({
   tripId,
   visibility,
   dayId,
+  dayDate,
+  lockedTimes,
+  tripStartDate,
+  tripEndDate,
+  timezone,
   afterItemId,
   precedingLocationName,
   followingLocationName,
@@ -49,6 +55,15 @@ export default function AddItemForm({
   visibility: "private" | "group";
   /** Set when opened from a day's own "+ Add" slot (see DayItemBuilder.tsx) -- omitted for a tab-level add, which creates a dayless item. */
   dayId?: string;
+  /** That day's own calendar date (`YYYY-MM-DD`) -- what the Starts/Ends fields default their date to. Omitted alongside dayId for a tab-level add, which falls back to the trip's first day instead. */
+  dayDate?: string;
+  /** That day's locked, timed activities (lodging excluded) -- see suggest-time.ts's suggestStartTime, which this feeds to guess a free-looking start time instead of leaving the field blank. Omitted for a tab-level add, which has no day to look at. */
+  lockedTimes?: TimedInterval[];
+  /** The trip's own span -- bounds the date a planner can pick (see the `min`/`max` on the Starts/Ends inputs below), and stands in for dayDate on a tab-level add. */
+  tripStartDate: string;
+  tripEndDate: string;
+  /** Needed to read lockedTimes' instants as this trip's own wall-clock hours -- see suggestStartTime. */
+  timezone: string;
   /** Where in that day's draft order to insert -- omitted appends to the end. Ignored once the item gets a startsAt, which always governs order instead. */
   afterItemId?: string;
   /**
@@ -72,6 +87,15 @@ export default function AddItemForm({
   const isLodging = category === "lodging";
   const isTransport = category === "transport";
   const autoFillsFromGap = isTransport && (transportSubtype === "drive" || transportSubtype === "rideshare");
+
+  // The date half defaults to whichever day we're already working in; a
+  // tab-level add (no day in context) falls back to the trip's first day
+  // rather than leaving the field empty and making someone hunt for it.
+  // The time half is a guess, not a fact -- see suggestStartTime -- so it's
+  // just as easy to change as if it had been typed by hand.
+  const startsAtDefault = `${dayDate ?? tripStartDate}T${suggestStartTime(lockedTimes ?? [], timezone)}`;
+  const dateMin = `${tripStartDate}T00:00`;
+  const dateMax = `${tripEndDate}T23:59`;
 
   return (
     <form action={createItemAction.bind(null, tripId)} className="grid gap-3">
@@ -151,11 +175,18 @@ export default function AddItemForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="mb-1 block text-stone-700">{isLodging ? "Arrival (optional)" : "Starts (optional)"}</span>
-          <input type="datetime-local" name="startsAt" className="input" />
+          <input
+            type="datetime-local"
+            name="startsAt"
+            defaultValue={startsAtDefault}
+            min={dateMin}
+            max={dateMax}
+            className="input"
+          />
         </label>
         <label className="block text-sm">
           <span className="mb-1 block text-stone-700">{isLodging ? "Departure (optional)" : "Ends (optional)"}</span>
-          <input type="datetime-local" name="endsAt" className="input" />
+          <input type="datetime-local" name="endsAt" min={dateMin} max={dateMax} className="input" />
         </label>
       </div>
 

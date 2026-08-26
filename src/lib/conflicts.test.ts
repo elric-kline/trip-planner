@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzeTimeline, windowsOverlap, itemsConflict, flagged, type ScheduleItem } from "./conflicts.ts";
+import {
+  analyzeTimeline,
+  windowsOverlap,
+  itemsConflict,
+  flagged,
+  findingKey,
+  findingRef,
+  type ScheduleItem,
+} from "./conflicts.ts";
 import type { TravelEstimate, TravelMode, TravelTimeProvider } from "./travel.ts";
 
 /** Deterministic stand-in: fixed minutes/overhead regardless of coordinates. */
@@ -281,4 +289,33 @@ test("itemsConflict: lodging only clashes with another lodging or its own arriva
     ),
     true,
   );
+});
+
+test("findingKey: the same before/after/reason/severity produces the same key, a change to any of them produces a different one", async () => {
+  const timeline = [
+    item("garden-tour", "2026-06-01T10:00:00Z", "2026-06-01T11:00:00Z", HERE),
+    item("dinner", "2026-06-01T11:15:00Z", "2026-06-01T13:00:00Z", HERE),
+  ];
+  const findings = flagged(await analyzeTimeline(timeline, new FixedTravelTimeProvider(10, 0)));
+  assert.equal(findings[0].severity, "tight");
+
+  const key = findingKey(findingRef(findings[0]));
+  assert.equal(key, findingKey(findingRef(findings[0])), "identical finding produces identical key");
+
+  // A worse gap on the same two items escalates to "conflict" -- a stale
+  // dismissal of the "tight" version must not silently cover this up, which
+  // is exactly what including severity in the key prevents.
+  const escalated = flagged(await analyzeTimeline(timeline, new FixedTravelTimeProvider(10, 10)));
+  assert.equal(escalated[0].severity, "conflict");
+  assert.notEqual(findingKey(findingRef(escalated[0])), key);
+});
+
+test("flagged narrows severity away from \"ok\", which is what lets findingRef take its result directly", async () => {
+  const timeline = [
+    item("a", "2026-06-01T10:00:00Z", "2026-06-01T11:00:00Z", HERE),
+    item("b", "2026-06-01T13:00:00Z", "2026-06-01T14:00:00Z", HERE),
+  ];
+  const findings = await analyzeTimeline(timeline, new FixedTravelTimeProvider(5, 0));
+  assert.equal(findings[0].severity, "ok", "a two-hour gap for a five-minute drive is fine");
+  assert.equal(flagged(findings).length, 0);
 });

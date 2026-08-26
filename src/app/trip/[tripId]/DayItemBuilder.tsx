@@ -1,8 +1,23 @@
 "use client";
 
 import type { Item } from "@/lib/scope.ts";
+import type { TimedInterval } from "@/lib/suggest-time.ts";
 import AddItemSheet from "./AddItemSheet.tsx";
 import { ItemRow } from "./itemDisplay.tsx";
+
+/**
+ * The day's own locked, timed activities -- what AddItemForm's Starts field
+ * guesses a free-looking time from (see suggest-time.ts's suggestStartTime).
+ * Lodging is excluded: a multi-day stay doesn't occupy this one day the way
+ * an activity does (see conflicts.ts's own treatment of lodging), so
+ * counting it here would read as "the whole day's booked" for a day that's
+ * actually wide open.
+ */
+function lockedTimesFor(items: Item[]): TimedInterval[] {
+  return items
+    .filter((i): i is Item & { startsAt: Date } => i.status === "locked" && i.category !== "lodging" && i.startsAt != null)
+    .map((i) => ({ startsAt: i.startsAt, endsAt: i.endsAt }));
+}
 
 /**
  * A day's own draft, as seen from PlaySpace: its group-visible items in order,
@@ -26,18 +41,28 @@ import { ItemRow } from "./itemDisplay.tsx";
 export default function DayItemBuilder({
   tripId,
   dayId,
+  dayDate,
   items,
   timezone,
+  tripStartDate,
+  tripEndDate,
   supportCounts,
   conflictedItemIds,
 }: {
   tripId: string;
   dayId: string;
+  /** This day's own calendar date -- see AddItemForm.tsx's dayDate. */
+  dayDate: string;
   items: Item[];
   timezone: string;
+  /** The trip's own span -- see AddItemForm.tsx's tripStartDate/tripEndDate. */
+  tripStartDate: string;
+  tripEndDate: string;
   supportCounts?: Map<string, number>;
   conflictedItemIds?: Set<string>;
 }) {
+  const lockedTimes = lockedTimesFor(items);
+
   return (
     <div>
       {items.length > 0 && (
@@ -57,6 +82,11 @@ export default function DayItemBuilder({
                     tripId={tripId}
                     visibility="group"
                     dayId={dayId}
+                    dayDate={dayDate}
+                    lockedTimes={lockedTimes}
+                    tripStartDate={tripStartDate}
+                    tripEndDate={tripEndDate}
+                    timezone={timezone}
                     afterItemId={item.id}
                     precedingLocationName={item.locationName}
                     followingLocationName={items[i + 1].locationName}
@@ -75,6 +105,11 @@ export default function DayItemBuilder({
           tripId={tripId}
           visibility="group"
           dayId={dayId}
+          dayDate={dayDate}
+          lockedTimes={lockedTimes}
+          tripStartDate={tripStartDate}
+          tripEndDate={tripEndDate}
+          timezone={timezone}
           trigger="row"
           label={items.length === 0 ? "Add the first thing for this day" : "Add"}
         />

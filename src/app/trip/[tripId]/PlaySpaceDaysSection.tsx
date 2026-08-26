@@ -15,6 +15,8 @@ export default function PlaySpaceDaysSection({
   days,
   itemsByDay,
   timezone,
+  tripStartDate,
+  tripEndDate,
   supportCounts,
   conflictedItemIds,
 }: {
@@ -22,6 +24,9 @@ export default function PlaySpaceDaysSection({
   days: TripDay[];
   itemsByDay: Map<string, Item[]>;
   timezone: string;
+  /** The trip's own span -- see PlaySpaceDayCard.tsx/AddItemForm.tsx. */
+  tripStartDate: string;
+  tripEndDate: string;
   supportCounts?: Map<string, number>;
   conflictedItemIds?: Set<string>;
 }) {
@@ -34,6 +39,8 @@ export default function PlaySpaceDaysSection({
           day={day}
           items={itemsByDay.get(day.id) ?? []}
           timezone={timezone}
+          tripStartDate={tripStartDate}
+          tripEndDate={tripEndDate}
           supportCounts={supportCounts}
           conflictedItemIds={conflictedItemIds}
         />

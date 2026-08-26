@@ -1,6 +1,17 @@
 import type { Coordinates, TravelTimeProvider } from "./travel.ts";
 import { HaversineTravelTimeProvider } from "./travel.ts";
-import { analyzeTimeline, DEFAULT_DURATION_MINUTES, flagged, itemsConflict, type ScheduleFinding, type ScheduleItem } from "./conflicts.ts";
+import {
+  analyzeTimeline,
+  DEFAULT_DURATION_MINUTES,
+  findingKey,
+  findingRef,
+  flagged,
+  itemsConflict,
+  type FlaggedFinding,
+  type ScheduleFinding,
+  type ScheduleItem,
+} from "./conflicts.ts";
+import { dismissedFindingKeysForViewer } from "./finding-dismissals.ts";
 import { rsvpsForItems } from "./attendance.ts";
 import { listItems, type Item, type TripAccess, type TripMemberSummary } from "./scope.ts";
 import { getTransportDetailsForItems, getTransportLegsForItems, type TransportLeg } from "./transport.ts";
@@ -200,6 +211,40 @@ export async function conflictsForViewer(
 
   const windows = await transportWindows(attending, flightStatusProvider);
   return analyzeTimeline(attending.map((item) => toScheduleItem(item, windows)), travelProvider);
+}
+
+export type TimelineFindings = {
+  /** What the trip page's own banner shows -- flagged, not yet acknowledged. */
+  active: FlaggedFinding[];
+  /** Flagged but dismissed by this viewer -- kept around so the UI can offer to bring one back. */
+  dismissed: FlaggedFinding[];
+};
+
+/**
+ * The viewer's own flagged findings (see conflictsForViewer/flagged), split
+ * by whether they've dismissed each one. Deliberately not folded into
+ * conflictsForViewer itself: analyzeTimeline stays pure and unaware of any
+ * one viewer's preferences (see its own doc comment), and a dismissal is
+ * exactly that -- "I've seen this specific gap and it's fine," not a fact
+ * about the schedule. previewLockImpact is untouched by this on purpose too:
+ * it reasons about *other* members' schedules, and a dismissal recorded by
+ * whoever's previewing the lock has no bearing on what a different member
+ * has or hasn't acknowledged about their own.
+ */
+export async function timelineFindingsForViewer(
+  access: TripAccess,
+  travelProvider: TravelTimeProvider = new HaversineTravelTimeProvider(),
+  flightStatusProvider: FlightStatusProvider = new NoopFlightStatusProvider(),
+): Promise<TimelineFindings> {
+  const findings = flagged(await conflictsForViewer(access, travelProvider, flightStatusProvider));
+  const dismissedKeys = await dismissedFindingKeysForViewer(access);
+
+  const active: FlaggedFinding[] = [];
+  const dismissed: FlaggedFinding[] = [];
+  for (const f of findings) {
+    (dismissedKeys.has(findingKey(findingRef(f))) ? dismissed : active).push(f);
+  }
+  return { active, dismissed };
 }
 
 export type LockImpact = {

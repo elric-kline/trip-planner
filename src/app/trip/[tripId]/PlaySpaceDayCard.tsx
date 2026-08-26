@@ -32,6 +32,8 @@ export default function PlaySpaceDayCard({
   day,
   items,
   timezone,
+  tripStartDate,
+  tripEndDate,
   supportCounts,
   conflictedItemIds,
 }: {
@@ -40,6 +42,9 @@ export default function PlaySpaceDayCard({
   /** Every non-declined, non-private item for this day: idea, proposed, AND locked. */
   items: Item[];
   timezone: string;
+  /** The trip's own span -- see DayItemBuilder.tsx/AddItemForm.tsx. */
+  tripStartDate: string;
+  tripEndDate: string;
   supportCounts?: Map<string, number>;
   conflictedItemIds?: Set<string>;
 }) {
@@ -71,8 +76,11 @@ export default function PlaySpaceDayCard({
             key={items.length}
             tripId={tripId}
             dayId={day.id}
+            dayDate={day.date}
             items={items}
             timezone={timezone}
+            tripStartDate={tripStartDate}
+            tripEndDate={tripEndDate}
             supportCounts={supportCounts}
             conflictedItemIds={conflictedItemIds}
           />

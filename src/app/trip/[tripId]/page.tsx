@@ -3,13 +3,19 @@ import { getCurrentUser } from "@/lib/auth.ts";
 import { displayName, displayNameWithEmail } from "@/lib/display-name.ts";
 import { AccessError, listItems, requireTripAccess, type Item } from "@/lib/scope.ts";
 import { PHASE_LABEL } from "@/lib/phase.ts";
-import { conflictsForViewer } from "@/lib/conflicts-for.ts";
+import { timelineFindingsForViewer } from "@/lib/conflicts-for.ts";
 import { defaultFlightStatusProvider } from "@/lib/flight-status.ts";
-import { flagged } from "@/lib/conflicts.ts";
+import { findingKey, findingRef, type FlaggedFinding } from "@/lib/conflicts.ts";
 import { attendingItems, rsvpsForItems } from "@/lib/attendance.ts";
 import { dietaryWarningsForViewer } from "@/lib/dietary-conflicts-for.ts";
 import { getAssistantHistory } from "@/lib/assistant.ts";
-import { createInviteAction, shareItemAction, setMemberRoleAction } from "./actions.ts";
+import {
+  createInviteAction,
+  dismissFindingAction,
+  shareItemAction,
+  setMemberRoleAction,
+  undismissFindingAction,
+} from "./actions.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import { emailDeliveryConfigured } from "@/lib/email.ts";
 import AddItemSheet from "./AddItemSheet.tsx";
@@ -31,6 +37,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "playspace", label: "PlaySpace" },
   { id: "scratchpad", label: "Scratchpad" },
 ];
+
+/** React list key for a finding -- see conflicts.ts's findingKey. Array index doesn't work here: dismissing one finding removes it from the list, which would shift every later index and hand React the wrong finding's prior state. */
+function findingKeyFor(f: FlaggedFinding): string {
+  return findingKey(findingRef(f));
+}
 
 /** Groups items by dayId, each day's list sorted by its manual/chronological draft order. Items with no dayId are dropped -- callers that want those filter separately (see the dayless "Ideas" lists below). */
 function groupByDay(items: Item[]): Map<string, Item[]> {
@@ -139,11 +150,16 @@ export default async function TripPage({
 
   // undefined keeps conflictsForViewer's own travel-time default (Haversine)
   // -- only the flight-status provider needs picking here.
-  const findings = flagged(await conflictsForViewer(access, undefined, defaultFlightStatusProvider()));
+  const { active: findings, dismissed: dismissedFindings } = await timelineFindingsForViewer(
+    access,
+    undefined,
+    defaultFlightStatusProvider(),
+  );
   const dietaryFindings = await dietaryWarningsForViewer(access);
-  // Every item named in a flagged finding, so the rows can carry the same mark
-  // the banner does -- it used to announce a clash while the offending rows
-  // looked exactly like the one that was fine.
+  // Every item named in a still-active finding, so the rows can carry the same
+  // mark the banner does -- it used to announce a clash while the offending
+  // rows looked exactly like the one that was fine. A dismissed finding's
+  // items are deliberately left unmarked: the viewer already said this one's fine.
   const conflictedItemIds = new Set(findings.flatMap((f) => [f.before.id, f.after.id]));
 
   const days = await listDays(access);
@@ -307,8 +323,8 @@ export default async function TripPage({
               and give you no way to reach either, so fixing a clash meant
               working out which day it was on and hunting for it. */}
           <ul className="space-y-2 text-sm text-amber-800">
-            {findings.map((f, i) => (
-              <li key={i}>
+            {findings.map((f) => (
+              <li key={findingKeyFor(f)}>
                 {f.severity === "conflict" ? "Conflict" : "Tight"}:{" "}
                 <a href={`/trip/${tripId}/items/${f.before.id}`} className="font-semibold underline">
                   {f.before.title}
@@ -326,11 +342,42 @@ export default async function TripPage({
                   className="whitespace-nowrap font-semibold underline"
                 >
                   Change the time →
-                </a>
+                </a>{" "}
+                {/* For cases like a dinner reservation timed off a fixed point
+                    on the same property as what precedes it -- the gap is
+                    measuring against a landmark, not real travel, so there's
+                    nothing to fix and the warning is just noise. */}
+                <form action={dismissFindingAction.bind(null, tripId, findingRef(f))} className="inline">
+                  <button type="submit" className="whitespace-nowrap font-semibold underline">
+                    Dismiss
+                  </button>
+                </form>
               </li>
             ))}
           </ul>
         </div>
+      )}
+
+      {dismissedFindings.length > 0 && (
+        <details className="rounded-md border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-600">
+          <summary className="cursor-pointer font-medium text-stone-700">
+            {dismissedFindings.length} dismissed {dismissedFindings.length === 1 ? "warning" : "warnings"}
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {dismissedFindings.map((f) => (
+              <li key={findingKeyFor(f)} className="flex flex-wrap items-center gap-1">
+                <span>
+                  {f.severity === "conflict" ? "Conflict" : "Tight"}: {f.before.title} → {f.after.title}
+                </span>
+                <form action={undismissFindingAction.bind(null, tripId, findingRef(f))} className="inline">
+                  <button type="submit" className="whitespace-nowrap font-semibold underline">
+                    Show again
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {dietaryFindings.length > 0 && (
@@ -445,6 +492,8 @@ export default async function TripPage({
             days={days}
             itemsByDay={inPlayByDay}
             timezone={access.trip.timezone}
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
             supportCounts={supportCounts}
             conflictedItemIds={conflictedItemIds}
           />
@@ -475,6 +524,9 @@ export default async function TripPage({
             key={`group-${inPlay.length}`}
             tripId={tripId}
             visibility="group"
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
+            timezone={access.trip.timezone}
             trigger="floating"
             label="Add an idea"
           />
@@ -507,6 +559,9 @@ export default async function TripPage({
             key={`private-${scratchpad.length}`}
             tripId={tripId}
             visibility="private"
+            tripStartDate={access.trip.startDate}
+            tripEndDate={access.trip.endDate}
+            timezone={access.trip.timezone}
             trigger="floating"
             label="Add a private idea"
           />

@@ -38,6 +38,8 @@ import {
   type DayLocationKind,
 } from "@/lib/days.ts";
 import { addComment, deleteComment } from "@/lib/comments.ts";
+import { dismissFinding, undismissFinding } from "@/lib/finding-dismissals.ts";
+import type { FindingRef } from "@/lib/conflicts.ts";
 import { sendTripInvite } from "@/lib/email.ts";
 import { absoluteOrigin } from "@/lib/url.ts";
 import { geocodeAddress } from "@/lib/geocode.ts";
@@ -369,6 +371,39 @@ export async function setRsvpAction(
   }
   revalidatePath(`/trip/${tripId}`);
   redirect(`/trip/${tripId}/items/${itemId}`);
+}
+
+/**
+ * Dismisses one flagged timeline finding for the current viewer -- e.g. a
+ * "tight" gap the conflict engine measured between two fixed points on the
+ * same property, where the traveler isn't actually worried about travel
+ * time. See lib/conflicts.ts's FindingRef for what identifies "this
+ * finding" and lib/finding-dismissals.ts for the actual write.
+ *
+ * No redirect, unlike most actions here -- this is posted from a button
+ * inline in the trip page's own warning banner, not a separate page.
+ */
+export async function dismissFindingAction(tripId: string, ref: FindingRef): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await dismissFinding(access, ref);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
+}
+
+/** Undoes dismissFindingAction -- brings a dismissed warning back. */
+export async function undismissFindingAction(tripId: string, ref: FindingRef): Promise<void> {
+  const user = await requireUser();
+  const access = await requireTripAccess(tripId, user);
+  try {
+    await undismissFinding(access, ref);
+  } catch (err) {
+    withError(tripId, err);
+  }
+  revalidatePath(`/trip/${tripId}`);
 }
 
 export async function addCommentAction(
