@@ -135,6 +135,7 @@ export default function PhotoJournal(props: Props) {
     | { kind: "day"; dayId: string }
     | { kind: "item"; itemId: string }
   >({ kind: "all" });
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const itemsByDay = useMemo(() => {
@@ -353,12 +354,13 @@ export default function PhotoJournal(props: Props) {
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {filteredPhotos.map((photo) => (
+          {filteredPhotos.map((photo, index) => (
             <PhotoCard
               key={photo.id}
               tripId={props.tripId}
               photo={photo}
               canDelete={photo.uploadedBy === props.viewerId || props.isPlanner}
+              onOpen={() => setLightboxIndex(index)}
               onDelete={() => handleDelete(photo.id)}
               onEditCaption={() => handleCaptionEdit(photo.id, photo.caption)}
               days={props.days}
@@ -366,6 +368,18 @@ export default function PhotoJournal(props: Props) {
             />
           ))}
         </ul>
+      )}
+
+      {lightboxIndex !== null && filteredPhotos[lightboxIndex] && (
+        <Lightbox
+          tripId={props.tripId}
+          photos={filteredPhotos}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          days={props.days}
+          items={props.items}
+        />
       )}
     </div>
   );
@@ -454,6 +468,7 @@ function PhotoCard({
   tripId,
   photo,
   canDelete,
+  onOpen,
   onDelete,
   onEditCaption,
   days,
@@ -462,6 +477,7 @@ function PhotoCard({
   tripId: string;
   photo: PhotoWire;
   canDelete: boolean;
+  onOpen: () => void;
   onDelete: () => void;
   onEditCaption: () => void;
   days: DayOption[];
@@ -481,7 +497,15 @@ function PhotoCard({
 
   return (
     <li className="group flex flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
-      <div className="relative aspect-square bg-stone-100">
+      {/* A button rather than a plain click handler on the div: keyboard
+          activation (Enter/Space) and screen-reader semantics come for free,
+          which the previous version's non-interactive tile didn't have. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={photo.caption ? `View "${photo.caption}"` : "View photo"}
+        className="relative block aspect-square bg-stone-100 focus:outline-none focus:ring-2 focus:ring-route-500"
+      >
         {/* next/image would need remoteHost config for the R2 signed URLs the
             view endpoint redirects to, and we already lazy-load + let R2
             do CDN duty. A plain <img> is the right primitive here. */}
@@ -490,12 +514,12 @@ function PhotoCard({
           src={`/api/trip/${tripId}/photos/${photo.id}/view`}
           alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
           loading="lazy"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover transition-opacity group-hover:opacity-90"
         />
         <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
           {scopeBadge}
         </span>
-      </div>
+      </button>
       <div className="flex flex-1 flex-col gap-1 px-2 py-1.5 text-xs">
         <p className="line-clamp-2 min-h-[2em] text-stone-700">
           {photo.caption ?? <span className="text-stone-400">No caption</span>}
@@ -691,6 +715,161 @@ function UploadPicker({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Fullscreen preview for one photo, driven by an index into the currently
+ * filtered gallery so left/right nav walks whatever the viewer's actually
+ * looking at (not the full trip). Escape and clicks on the backdrop both
+ * close; keyboard arrows step through neighbours. Uses the same
+ * /view endpoint the thumbnails do -- the API redirects to the R2 URL,
+ * which for a custom-domain deploy is a public CDN fetch and for a bare
+ * bucket is a presigned URL -- so this stays honest to the app's own auth
+ * either way.
+ */
+function Lightbox({
+  tripId,
+  photos,
+  index,
+  onIndexChange,
+  onClose,
+  days,
+  items,
+}: {
+  tripId: string;
+  photos: PhotoWire[];
+  index: number;
+  onIndexChange: (next: number) => void;
+  onClose: () => void;
+  days: DayOption[];
+  items: ItemOption[];
+}) {
+  const photo = photos[index];
+
+  const scopeLabel = useMemo(() => {
+    if (!photo) return "";
+    if (photo.scope === "item") {
+      const item = items.find((i) => i.id === photo.itemId);
+      return item ? `Item · ${item.title}` : "Item";
+    }
+    if (photo.scope === "day") {
+      const day = days.find((d) => d.id === photo.dayId);
+      return day ? `Day · ${day.date}` : "Day";
+    }
+    return "Trip";
+  }, [photo, days, items]);
+
+  const goPrev = useCallback(() => {
+    if (index > 0) onIndexChange(index - 1);
+  }, [index, onIndexChange]);
+  const goNext = useCallback(() => {
+    if (index < photos.length - 1) onIndexChange(index + 1);
+  }, [index, onIndexChange, photos.length]);
+
+  useEffect(() => {
+    // Global keyboard nav while the lightbox is up. Cleaned up on close so
+    // the arrow keys don't stay hijacked once the viewer's back in the grid.
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPrev();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNext();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goPrev, goNext, onClose]);
+
+  useEffect(() => {
+    // Same "keep the page behind from scrolling" trick Sheet.tsx uses for
+    // its modal. Without this the page still scrolls under the overlay on
+    // Safari.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  if (!photo) return null;
+
+  return (
+    <div
+      // A native <dialog> would give us focus trap + inertness for free
+      // (Sheet.tsx already uses one), but the picker sheet is not
+      // guaranteed closed here and two nested <dialog>s misbehave in Safari.
+      // Rolling our own with role="dialog" and an outside-click handler is
+      // the safer path for this specific overlay.
+      role="dialog"
+      aria-modal="true"
+      aria-label={photo.caption ?? "Photo"}
+      onClick={(event) => {
+        // Only close when the backdrop itself is clicked -- not when a click
+        // bubbles up from the image or the controls inside it.
+        if (event.target === event.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+    >
+      {index > 0 && (
+        <button
+          type="button"
+          onClick={goPrev}
+          aria-label="Previous photo"
+          className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-3 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+        >
+          <span aria-hidden="true">‹</span>
+        </button>
+      )}
+      {index < photos.length - 1 && (
+        <button
+          type="button"
+          onClick={goNext}
+          aria-label="Next photo"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-3 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-3 top-3 rounded-full bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+      >
+        ✕
+      </button>
+
+      <figure className="flex max-h-full max-w-full flex-col items-center gap-2">
+        {/* Same reasoning as PhotoCard -- signed URLs aren't a fit for
+            next/image without wiring remotePatterns, and R2 is already
+            our CDN. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          key={photo.id}
+          src={`/api/trip/${tripId}/photos/${photo.id}/view`}
+          alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
+          className="max-h-[85vh] max-w-full rounded-md object-contain"
+        />
+        <figcaption className="max-w-2xl text-center text-sm text-stone-100">
+          {photo.caption && <p className="mb-1">{photo.caption}</p>}
+          <p className="text-xs text-stone-300">
+            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+              {scopeLabel}
+            </span>{" "}
+            · {photo.uploaderName ?? photo.uploaderEmail} ·{" "}
+            {new Date(photo.capturedAt ?? photo.createdAt).toLocaleString()} · {index + 1} of{" "}
+            {photos.length}
+          </p>
+        </figcaption>
+      </figure>
     </div>
   );
 }
