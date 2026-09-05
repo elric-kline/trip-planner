@@ -21,6 +21,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "drizzle-orm": "^0.45.2",
     "next": "^15.5.22",
     "postgres": "^3.4.9",
