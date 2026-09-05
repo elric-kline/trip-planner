@@ -30,12 +30,16 @@ import { describeTimezone } from "@/lib/timezone.ts";
 import { DIETARY_TAG_LABEL } from "@/lib/dietary.ts";
 import { listDays, locationMembersForLocations, locationsForDays } from "@/lib/days.ts";
 import { getPassportDetailsForUsers } from "@/lib/passport.ts";
+import { listTripPhotos } from "@/lib/photos.ts";
+import { isStorageConfigured } from "@/lib/r2.ts";
+import PhotoJournal, { type ItemOption, type PhotoWire } from "./PhotoJournal.tsx";
 
-type Tab = "agreed" | "playspace" | "scratchpad";
+type Tab = "agreed" | "playspace" | "scratchpad" | "photos";
 const TABS: { id: Tab; label: string }[] = [
   { id: "agreed", label: "Agreed" },
   { id: "playspace", label: "PlaySpace" },
   { id: "scratchpad", label: "Scratchpad" },
+  { id: "photos", label: "Photos" },
 ];
 
 /** React list key for a finding -- see conflicts.ts's findingKey. Array index doesn't work here: dismissing one finding removes it from the list, which would shift every later index and hand React the wrong finding's prior state. */
@@ -81,7 +85,8 @@ export default async function TripPage({
   // Plain searchParams-driven tabs, not client state -- linkable/bookmarkable
   // for free, no JS needed. An unrecognized or missing value just falls
   // back to Agreed rather than erroring.
-  const activeTab: Tab = tab === "playspace" || tab === "scratchpad" ? tab : "agreed";
+  const activeTab: Tab =
+    tab === "playspace" || tab === "scratchpad" || tab === "photos" ? tab : "agreed";
   // Same reasoning for the Agreed tab's own itinerary toggle -- "mine" is
   // the default (an item you declined or never RSVP'd to stays out of your
   // own view), "all" shows the whole group's settled plan regardless of
@@ -90,6 +95,27 @@ export default async function TripPage({
   // Only fetched for the tab that actually shows it -- no point querying the
   // assistant's own conversation log on every other tab's render.
   const assistantHistory = activeTab === "scratchpad" ? await getAssistantHistory(access) : [];
+  // Same "only fetch when we'll show it" rule for the photo journal --
+  // listTripPhotos joins users, so it's not free on a load that never renders
+  // the tab.
+  const initialPhotos: PhotoWire[] =
+    activeTab === "photos"
+      ? (await listTripPhotos(access)).map((p) => ({
+          id: p.id,
+          tripId: p.tripId,
+          scope: p.scope,
+          dayId: p.dayId,
+          itemId: p.itemId,
+          uploadedBy: p.uploadedBy,
+          uploaderName: p.uploaderName,
+          uploaderEmail: p.uploaderEmail,
+          mimeType: p.mimeType,
+          sizeBytes: p.sizeBytes,
+          caption: p.caption,
+          capturedAt: p.capturedAt?.toISOString() ?? null,
+          createdAt: p.createdAt.toISOString(),
+        }))
+      : [];
   // Only the planner ever sees passport info at all (see
   // canViewMemberPassport) -- a participant never pays the decrypt cost for
   // data they can't see anyway.
@@ -529,6 +555,24 @@ export default async function TripPage({
             timezone={access.trip.timezone}
             trigger="floating"
             label="Add an idea"
+          />
+        </div>
+      )}
+
+      {activeTab === "photos" && (
+        <div className="space-y-6 pb-20">
+          <p className="text-xs text-stone-400">
+            A shared journal for the trip. Anyone on the trip can add photos; attach them to a
+            specific item, a day, or the whole trip.
+          </p>
+          <PhotoJournal
+            tripId={tripId}
+            viewerId={access.viewer.id}
+            isPlanner={access.isPlanner}
+            initialPhotos={initialPhotos}
+            days={days.map((d) => ({ id: d.id, date: d.date }))}
+            items={items.map<ItemOption>((i) => ({ id: i.id, title: i.title, dayId: i.dayId }))}
+            storageConfigured={isStorageConfigured()}
           />
         </div>
       )}

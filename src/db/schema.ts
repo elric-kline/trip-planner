@@ -468,6 +468,75 @@ export const itemComments = pgTable(
   (t) => [index("item_comments_item_idx").on(t.itemId, t.createdAt)],
 );
 
+/**
+ * Which level of the trip a photo hangs off. `trip` is a bare trip-wide
+ * upload with no day or item context (the "somewhere on this trip" case);
+ * `day` is scoped to a specific calendar day; `item` is attached to one
+ * itinerary item (a lodging card, a dinner, an activity).
+ *
+ * An explicit enum, rather than deriving the scope from which FK is
+ * populated, so gallery queries don't have to be phrased as "where dayId is
+ * null and itemId is null" every time -- one indexed equality does it. The
+ * server-level invariant is: `trip` has neither FK, `day` has dayId only,
+ * `item` has itemId (and may also carry dayId as a convenience for a day's
+ * mixed gallery -- see lib/photos.ts).
+ */
+export const photoScope = pgEnum("photo_scope", ["trip", "day", "item"]);
+
+/**
+ * A photo journal entry -- always belongs to a trip, optionally pinned to a
+ * specific day or item. Bytes live in Cloudflare R2 (see lib/r2.ts); this
+ * table only carries the metadata needed to authorize a read, render a
+ * thumbnail card, and locate the object in the bucket.
+ *
+ * `storageKey` is opaque to callers -- the R2 key convention is owned by
+ * lib/r2.ts's objectKeyFor. Keeping it as a column (rather than deriving it
+ * from tripId + id every time) is what lets a future migration reshuffle
+ * the key layout without a data-touching backfill.
+ *
+ * Deletes cascade from the trip (dropping the trip drops every photo);
+ * set-null from item and day, matching how items.dayId already behaves --
+ * losing the item or day shouldn't destroy the photo, just re-scope it back
+ * to the trip. The row moves scope to `trip` explicitly in the app layer
+ * when that happens, not via a DB trigger -- see lib/photos.ts's
+ * detachOrphanedPhotos.
+ */
+export const photos = pgTable(
+  "photos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    /** Null for a `trip`-scoped photo; the day id for `day`-scoped and (optionally) `item`-scoped. */
+    dayId: uuid("day_id").references(() => tripDays.id, { onDelete: "set null" }),
+    /** Null unless scope is `item`. */
+    itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    scope: photoScope("scope").notNull(),
+    uploadedBy: uuid("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    /** Opaque R2 key -- see lib/r2.ts's objectKeyFor. */
+    storageKey: text("storage_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Optional freeform note from the uploader -- what's happening in the photo, who's in it. Trimmed and length-capped in lib/photos.ts. */
+    caption: text("caption"),
+    /**
+     * When the photo was actually taken, if the uploader supplied it (EXIF
+     * DateTimeOriginal, extracted client-side). Null falls back to
+     * `createdAt` for chronological display -- see listPhotos.
+     */
+    capturedAt: timestamp("captured_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("photos_trip_idx").on(t.tripId, t.createdAt),
+    index("photos_day_idx").on(t.dayId),
+    index("photos_item_idx").on(t.itemId),
+  ],
+);
+
 export const lodgingPaymentStatus = pgEnum("lodging_payment_status", [
   "prepaid",
   "partial",
