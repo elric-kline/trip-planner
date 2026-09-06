@@ -135,6 +135,7 @@ export default function PhotoJournal(props: Props) {
     | { kind: "day"; dayId: string }
     | { kind: "item"; itemId: string }
   >({ kind: "all" });
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const itemsByDay = useMemo(() => {
@@ -353,12 +354,13 @@ export default function PhotoJournal(props: Props) {
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {filteredPhotos.map((photo) => (
+          {filteredPhotos.map((photo, index) => (
             <PhotoCard
               key={photo.id}
               tripId={props.tripId}
               photo={photo}
               canDelete={photo.uploadedBy === props.viewerId || props.isPlanner}
+              onOpen={() => setLightboxIndex(index)}
               onDelete={() => handleDelete(photo.id)}
               onEditCaption={() => handleCaptionEdit(photo.id, photo.caption)}
               days={props.days}
@@ -366,6 +368,18 @@ export default function PhotoJournal(props: Props) {
             />
           ))}
         </ul>
+      )}
+
+      {lightboxIndex !== null && filteredPhotos[lightboxIndex] && (
+        <Lightbox
+          tripId={props.tripId}
+          photos={filteredPhotos}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          days={props.days}
+          items={props.items}
+        />
       )}
     </div>
   );
@@ -454,6 +468,7 @@ function PhotoCard({
   tripId,
   photo,
   canDelete,
+  onOpen,
   onDelete,
   onEditCaption,
   days,
@@ -462,6 +477,7 @@ function PhotoCard({
   tripId: string;
   photo: PhotoWire;
   canDelete: boolean;
+  onOpen: () => void;
   onDelete: () => void;
   onEditCaption: () => void;
   days: DayOption[];
@@ -481,7 +497,15 @@ function PhotoCard({
 
   return (
     <li className="group flex flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
-      <div className="relative aspect-square bg-stone-100">
+      {/* A button rather than a plain click handler on the div: keyboard
+          activation (Enter/Space) and screen-reader semantics come for free,
+          which the previous version's non-interactive tile didn't have. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={photo.caption ? `View "${photo.caption}"` : "View photo"}
+        className="relative block aspect-square bg-stone-100 focus:outline-none focus:ring-2 focus:ring-route-500"
+      >
         {/* next/image would need remoteHost config for the R2 signed URLs the
             view endpoint redirects to, and we already lazy-load + let R2
             do CDN duty. A plain <img> is the right primitive here. */}
@@ -490,12 +514,12 @@ function PhotoCard({
           src={`/api/trip/${tripId}/photos/${photo.id}/view`}
           alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
           loading="lazy"
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover transition-opacity group-hover:opacity-90"
         />
         <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
           {scopeBadge}
         </span>
-      </div>
+      </button>
       <div className="flex flex-1 flex-col gap-1 px-2 py-1.5 text-xs">
         <p className="line-clamp-2 min-h-[2em] text-stone-700">
           {photo.caption ?? <span className="text-stone-400">No caption</span>}
@@ -691,6 +715,256 @@ function UploadPicker({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Fullscreen preview for the currently filtered gallery, laid out as a
+ * horizontally-scrollable CSS scroll-snap carousel. That's what gives us
+ * one-finger swipe on phones and two-finger horizontal swipe on
+ * trackpads for free -- no touch handlers, no gesture library. Arrow
+ * keys and the on-screen chevrons stay wired for keyboard/mouse; both
+ * routes just call the same programmatic-scroll helper.
+ *
+ * Every filtered photo has a real slide in the DOM so the browser can
+ * snap between them and the scroll position stays honest. Images use
+ * `loading="lazy"` -- the browser only actually fetches slides near the
+ * viewport, so this is fine even for a big gallery.
+ *
+ * Uses the same /view endpoint the thumbnails do -- the API redirects to
+ * the R2 URL, which for a custom-domain deploy is a public CDN fetch and
+ * for a bare bucket is a presigned URL -- so this stays honest to the
+ * app's own auth either way.
+ */
+function Lightbox({
+  tripId,
+  photos,
+  index,
+  onIndexChange,
+  onClose,
+  days,
+  items,
+}: {
+  tripId: string;
+  photos: PhotoWire[];
+  index: number;
+  onIndexChange: (next: number) => void;
+  onClose: () => void;
+  days: DayOption[];
+  items: ItemOption[];
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const photo = photos[index];
+
+  const scopeLabelFor = useCallback(
+    (p: PhotoWire) => {
+      if (p.scope === "item") {
+        const item = items.find((i) => i.id === p.itemId);
+        return item ? `Item · ${item.title}` : "Item";
+      }
+      if (p.scope === "day") {
+        const day = days.find((d) => d.id === p.dayId);
+        return day ? `Day · ${day.date}` : "Day";
+      }
+      return "Trip";
+    },
+    [days, items],
+  );
+
+  /**
+   * Programmatic-scroll target. Used by the chevrons and keyboard nav --
+   * the carousel handles user-initiated swipes on its own, without going
+   * through this. Deliberately does NOT read from React's `index` state:
+   * a chevron press sets state AND scrolls in the same tick, so if we
+   * kept a sync-from-state effect around it'd race with the user's own
+   * swipe (mid-flick, state ticks up, the effect re-snaps to that slide,
+   * cancelling their momentum).
+   */
+  const scrollToSlide = useCallback((next: number, behavior: ScrollBehavior = "smooth") => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ left: next * el.clientWidth, behavior });
+  }, []);
+
+  const goPrev = useCallback(() => {
+    if (index > 0) {
+      onIndexChange(index - 1);
+      scrollToSlide(index - 1);
+    }
+  }, [index, onIndexChange, scrollToSlide]);
+  const goNext = useCallback(() => {
+    if (index < photos.length - 1) {
+      onIndexChange(index + 1);
+      scrollToSlide(index + 1);
+    }
+  }, [index, onIndexChange, photos.length, scrollToSlide]);
+
+  useEffect(() => {
+    // Global keyboard nav while the lightbox is up. Cleaned up on close so
+    // the arrow keys don't stay hijacked once the viewer's back in the grid.
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPrev();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNext();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goPrev, goNext, onClose]);
+
+  useEffect(() => {
+    // Same "keep the page behind from scrolling" trick Sheet.tsx uses for
+    // its modal. Without this the page still scrolls under the overlay on
+    // Safari.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Land on the tapped photo on mount -- no smooth scroll here, we don't
+    // want the lightbox to open and then animate across a full trip's
+    // worth of slides.
+    scrollToSlide(index, "auto");
+    // Only on mount; subsequent `index` changes come from either the scroll
+    // handler (already in the right position) or from goPrev/goNext (which
+    // already scrolled).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Which slide the viewer is actually looking at right now. Debounced via
+   * requestAnimationFrame -- the scroll event fires every frame during a
+   * fling and we only need one state update per settled position.
+   */
+  const rafRef = useRef<number | null>(null);
+  const onScroll = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = scrollerRef.current;
+      if (!el) return;
+      const width = el.clientWidth;
+      if (width === 0) return;
+      const nextIndex = Math.round(el.scrollLeft / width);
+      if (nextIndex !== index && nextIndex >= 0 && nextIndex < photos.length) {
+        onIndexChange(nextIndex);
+      }
+    });
+  }, [index, onIndexChange, photos.length]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  if (!photo) return null;
+
+  return (
+    <div
+      // A native <dialog> would give us focus trap + inertness for free
+      // (Sheet.tsx already uses one), but the picker sheet is not
+      // guaranteed closed here and two nested <dialog>s misbehave in Safari.
+      // Rolling our own with role="dialog" and an outside-click handler is
+      // the safer path for this specific overlay.
+      role="dialog"
+      aria-modal="true"
+      aria-label={photo.caption ?? "Photo"}
+      className="fixed inset-0 z-50 bg-black/85"
+    >
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        // scroll-snap on the container + snap-center on each slide is what
+        // turns a plain overflow-x-auto into a swipeable carousel. `snap-always`
+        // (CSS scroll-snap-stop) keeps a fling from blowing past multiple
+        // slides in one gesture, which for a photo viewer feels wrong --
+        // one flick, one photo.
+        className="flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {photos.map((p, i) => (
+          <div
+            key={p.id}
+            // A slide is a full-width, full-height column: image up top,
+            // caption below. Clicking anywhere inside the slide that isn't
+            // the image or the caption closes the lightbox -- same "click
+            // the empty space" affordance the backdrop used to have.
+            className="flex h-full w-full shrink-0 snap-center snap-always flex-col items-center justify-center gap-2 p-4"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) onClose();
+            }}
+          >
+            <figure className="flex min-h-0 max-w-full flex-col items-center gap-2">
+              {/* Same reasoning as PhotoCard -- signed URLs aren't a fit
+                  for next/image without wiring remotePatterns, and R2 is
+                  already our CDN. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/trip/${tripId}/photos/${p.id}/view`}
+                alt={p.caption ?? `Photo by ${p.uploaderName ?? p.uploaderEmail}`}
+                // Only eagerly load the current slide and its immediate
+                // neighbours -- everything else waits for the viewer to
+                // actually swipe near it. This is what makes a big gallery
+                // scale without blowing up the first-open network budget.
+                loading={Math.abs(i - index) <= 1 ? "eager" : "lazy"}
+                className="max-h-[80vh] max-w-full rounded-md object-contain"
+              />
+              <figcaption className="max-w-2xl text-center text-sm text-stone-100">
+                {p.caption && <p className="mb-1">{p.caption}</p>}
+                <p className="text-xs text-stone-300">
+                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+                    {scopeLabelFor(p)}
+                  </span>{" "}
+                  · {p.uploaderName ?? p.uploaderEmail} ·{" "}
+                  {new Date(p.capturedAt ?? p.createdAt).toLocaleString()} · {i + 1} of{" "}
+                  {photos.length}
+                </p>
+              </figcaption>
+            </figure>
+          </div>
+        ))}
+      </div>
+
+      {index > 0 && (
+        <button
+          type="button"
+          onClick={goPrev}
+          aria-label="Previous photo"
+          className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-3 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+        >
+          <span aria-hidden="true">‹</span>
+        </button>
+      )}
+      {index < photos.length - 1 && (
+        <button
+          type="button"
+          onClick={goNext}
+          aria-label="Next photo"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-3 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-3 top-3 rounded-full bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+      >
+        ✕
+      </button>
     </div>
   );
 }
