@@ -720,14 +720,22 @@ function UploadPicker({
 }
 
 /**
- * Fullscreen preview for one photo, driven by an index into the currently
- * filtered gallery so left/right nav walks whatever the viewer's actually
- * looking at (not the full trip). Escape and clicks on the backdrop both
- * close; keyboard arrows step through neighbours. Uses the same
- * /view endpoint the thumbnails do -- the API redirects to the R2 URL,
- * which for a custom-domain deploy is a public CDN fetch and for a bare
- * bucket is a presigned URL -- so this stays honest to the app's own auth
- * either way.
+ * Fullscreen preview for the currently filtered gallery, laid out as a
+ * horizontally-scrollable CSS scroll-snap carousel. That's what gives us
+ * one-finger swipe on phones and two-finger horizontal swipe on
+ * trackpads for free -- no touch handlers, no gesture library. Arrow
+ * keys and the on-screen chevrons stay wired for keyboard/mouse; both
+ * routes just call the same programmatic-scroll helper.
+ *
+ * Every filtered photo has a real slide in the DOM so the browser can
+ * snap between them and the scroll position stays honest. Images use
+ * `loading="lazy"` -- the browser only actually fetches slides near the
+ * viewport, so this is fine even for a big gallery.
+ *
+ * Uses the same /view endpoint the thumbnails do -- the API redirects to
+ * the R2 URL, which for a custom-domain deploy is a public CDN fetch and
+ * for a bare bucket is a presigned URL -- so this stays honest to the
+ * app's own auth either way.
  */
 function Lightbox({
   tripId,
@@ -746,27 +754,51 @@ function Lightbox({
   days: DayOption[];
   items: ItemOption[];
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const photo = photos[index];
 
-  const scopeLabel = useMemo(() => {
-    if (!photo) return "";
-    if (photo.scope === "item") {
-      const item = items.find((i) => i.id === photo.itemId);
-      return item ? `Item · ${item.title}` : "Item";
-    }
-    if (photo.scope === "day") {
-      const day = days.find((d) => d.id === photo.dayId);
-      return day ? `Day · ${day.date}` : "Day";
-    }
-    return "Trip";
-  }, [photo, days, items]);
+  const scopeLabelFor = useCallback(
+    (p: PhotoWire) => {
+      if (p.scope === "item") {
+        const item = items.find((i) => i.id === p.itemId);
+        return item ? `Item · ${item.title}` : "Item";
+      }
+      if (p.scope === "day") {
+        const day = days.find((d) => d.id === p.dayId);
+        return day ? `Day · ${day.date}` : "Day";
+      }
+      return "Trip";
+    },
+    [days, items],
+  );
+
+  /**
+   * Programmatic-scroll target. Used by the chevrons and keyboard nav --
+   * the carousel handles user-initiated swipes on its own, without going
+   * through this. Deliberately does NOT read from React's `index` state:
+   * a chevron press sets state AND scrolls in the same tick, so if we
+   * kept a sync-from-state effect around it'd race with the user's own
+   * swipe (mid-flick, state ticks up, the effect re-snaps to that slide,
+   * cancelling their momentum).
+   */
+  const scrollToSlide = useCallback((next: number, behavior: ScrollBehavior = "smooth") => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ left: next * el.clientWidth, behavior });
+  }, []);
 
   const goPrev = useCallback(() => {
-    if (index > 0) onIndexChange(index - 1);
-  }, [index, onIndexChange]);
+    if (index > 0) {
+      onIndexChange(index - 1);
+      scrollToSlide(index - 1);
+    }
+  }, [index, onIndexChange, scrollToSlide]);
   const goNext = useCallback(() => {
-    if (index < photos.length - 1) onIndexChange(index + 1);
-  }, [index, onIndexChange, photos.length]);
+    if (index < photos.length - 1) {
+      onIndexChange(index + 1);
+      scrollToSlide(index + 1);
+    }
+  }, [index, onIndexChange, photos.length, scrollToSlide]);
 
   useEffect(() => {
     // Global keyboard nav while the lightbox is up. Cleaned up on close so
@@ -798,6 +830,44 @@ function Lightbox({
     };
   }, []);
 
+  useEffect(() => {
+    // Land on the tapped photo on mount -- no smooth scroll here, we don't
+    // want the lightbox to open and then animate across a full trip's
+    // worth of slides.
+    scrollToSlide(index, "auto");
+    // Only on mount; subsequent `index` changes come from either the scroll
+    // handler (already in the right position) or from goPrev/goNext (which
+    // already scrolled).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Which slide the viewer is actually looking at right now. Debounced via
+   * requestAnimationFrame -- the scroll event fires every frame during a
+   * fling and we only need one state update per settled position.
+   */
+  const rafRef = useRef<number | null>(null);
+  const onScroll = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = scrollerRef.current;
+      if (!el) return;
+      const width = el.clientWidth;
+      if (width === 0) return;
+      const nextIndex = Math.round(el.scrollLeft / width);
+      if (nextIndex !== index && nextIndex >= 0 && nextIndex < photos.length) {
+        onIndexChange(nextIndex);
+      }
+    });
+  }, [index, onIndexChange, photos.length]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
   if (!photo) return null;
 
   return (
@@ -810,13 +880,62 @@ function Lightbox({
       role="dialog"
       aria-modal="true"
       aria-label={photo.caption ?? "Photo"}
-      onClick={(event) => {
-        // Only close when the backdrop itself is clicked -- not when a click
-        // bubbles up from the image or the controls inside it.
-        if (event.target === event.currentTarget) onClose();
-      }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+      className="fixed inset-0 z-50 bg-black/85"
     >
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        // scroll-snap on the container + snap-center on each slide is what
+        // turns a plain overflow-x-auto into a swipeable carousel. `snap-always`
+        // (CSS scroll-snap-stop) keeps a fling from blowing past multiple
+        // slides in one gesture, which for a photo viewer feels wrong --
+        // one flick, one photo.
+        className="flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {photos.map((p, i) => (
+          <div
+            key={p.id}
+            // A slide is a full-width, full-height column: image up top,
+            // caption below. Clicking anywhere inside the slide that isn't
+            // the image or the caption closes the lightbox -- same "click
+            // the empty space" affordance the backdrop used to have.
+            className="flex h-full w-full shrink-0 snap-center snap-always flex-col items-center justify-center gap-2 p-4"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) onClose();
+            }}
+          >
+            <figure className="flex min-h-0 max-w-full flex-col items-center gap-2">
+              {/* Same reasoning as PhotoCard -- signed URLs aren't a fit
+                  for next/image without wiring remotePatterns, and R2 is
+                  already our CDN. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/trip/${tripId}/photos/${p.id}/view`}
+                alt={p.caption ?? `Photo by ${p.uploaderName ?? p.uploaderEmail}`}
+                // Only eagerly load the current slide and its immediate
+                // neighbours -- everything else waits for the viewer to
+                // actually swipe near it. This is what makes a big gallery
+                // scale without blowing up the first-open network budget.
+                loading={Math.abs(i - index) <= 1 ? "eager" : "lazy"}
+                className="max-h-[80vh] max-w-full rounded-md object-contain"
+              />
+              <figcaption className="max-w-2xl text-center text-sm text-stone-100">
+                {p.caption && <p className="mb-1">{p.caption}</p>}
+                <p className="text-xs text-stone-300">
+                  <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+                    {scopeLabelFor(p)}
+                  </span>{" "}
+                  · {p.uploaderName ?? p.uploaderEmail} ·{" "}
+                  {new Date(p.capturedAt ?? p.createdAt).toLocaleString()} · {i + 1} of{" "}
+                  {photos.length}
+                </p>
+              </figcaption>
+            </figure>
+          </div>
+        ))}
+      </div>
+
       {index > 0 && (
         <button
           type="button"
@@ -846,30 +965,6 @@ function Lightbox({
       >
         ✕
       </button>
-
-      <figure className="flex max-h-full max-w-full flex-col items-center gap-2">
-        {/* Same reasoning as PhotoCard -- signed URLs aren't a fit for
-            next/image without wiring remotePatterns, and R2 is already
-            our CDN. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          key={photo.id}
-          src={`/api/trip/${tripId}/photos/${photo.id}/view`}
-          alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
-          className="max-h-[85vh] max-w-full rounded-md object-contain"
-        />
-        <figcaption className="max-w-2xl text-center text-sm text-stone-100">
-          {photo.caption && <p className="mb-1">{photo.caption}</p>}
-          <p className="text-xs text-stone-300">
-            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-              {scopeLabel}
-            </span>{" "}
-            · {photo.uploaderName ?? photo.uploaderEmail} ·{" "}
-            {new Date(photo.capturedAt ?? photo.createdAt).toLocaleString()} · {index + 1} of{" "}
-            {photos.length}
-          </p>
-        </figcaption>
-      </figure>
     </div>
   );
 }
