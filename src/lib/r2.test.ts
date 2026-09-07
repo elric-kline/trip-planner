@@ -69,6 +69,9 @@ test("a test backend installs cleanly and unregisters via resetBackend", (t) => 
 
   installTestBackend({
     async putObject() {},
+    async getObject() {
+      return { bytes: new Uint8Array(), mimeType: "application/octet-stream" };
+    },
     async deleteObject() {},
     async deleteObjects() {},
     async signedGetUrl(key) {

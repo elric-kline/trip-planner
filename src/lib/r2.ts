@@ -15,11 +15,11 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
  * https://<accountId>.r2.cloudflarestorage.com -- and `region: "auto"`, which
  * R2 accepts on every request.
  *
- * Everything a caller does goes through the four exported functions below.
- * They deliberately never expose the S3Client itself: keeping the surface
- * narrow means an accidentally-added HeadObject/ListObjects call somewhere
- * else in the codebase can't leak information the app has no reason to hand
- * out. If a new operation is genuinely needed later, add it here.
+ * Everything a caller does goes through the exported functions below. They
+ * deliberately never expose the S3Client itself: keeping the surface narrow
+ * means an accidentally-added HeadObject/ListObjects call somewhere else in
+ * the codebase can't leak information the app has no reason to hand out. If
+ * a new operation is genuinely needed later, add it here.
  *
  * Uploaded objects live under `photos/<tripId>/<photoId>` so a manual sweep
  * for "everything belonging to this trip" is a bucket-prefix listing rather
@@ -123,6 +123,7 @@ export function objectKeyFor(tripId: string, photoId: string): string {
  */
 export type StorageBackend = {
   putObject(key: string, bytes: Uint8Array, mimeType: string): Promise<void>;
+  getObject(key: string): Promise<{ bytes: Uint8Array; mimeType: string }>;
   deleteObject(key: string): Promise<void>;
   deleteObjects(keys: string[]): Promise<void>;
   signedGetUrl(key: string, ttlSeconds?: number): Promise<string>;
@@ -140,6 +141,17 @@ function defaultBackend(): StorageBackend {
           ContentType: mimeType,
         }),
       );
+    },
+    async getObject(key) {
+      const { client: s3, bucket } = client();
+      const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!res.Body) throw new Error(`R2 object ${key} has no body`);
+      // The SDK adds these read helpers to the Body stream; transformToByteArray
+      // buffers the whole object in memory, which is what we want for a
+      // photo-download proxy -- the caller is about to write it straight to
+      // the response body.
+      const bytes = await res.Body.transformToByteArray();
+      return { bytes, mimeType: res.ContentType ?? "application/octet-stream" };
     },
     async deleteObject(key) {
       const { client: s3, bucket } = client();
@@ -198,6 +210,18 @@ export function resetBackend(): void {
 /** Uploads bytes to R2. Overwrites in place -- the (tripId, photoId) key is unique per photo, so an overwrite is by definition intentional. */
 export function putObject(key: string, bytes: Uint8Array, mimeType: string): Promise<void> {
   return activeBackend().putObject(key, bytes, mimeType);
+}
+
+/**
+ * Reads an object's bytes back into memory. Used by the download proxy
+ * route -- we could hand out a signed R2 URL with a Content-Disposition
+ * override, but that only works on presigned URLs, not on custom-domain
+ * public URLs. Proxying uniformly through the server is what lets the
+ * download button behave the same regardless of which delivery mode the
+ * deploy uses.
+ */
+export function getObject(key: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  return activeBackend().getObject(key);
 }
 
 /** Removes one object. Not a hard error if it isn't there -- a DB row without a matching object is a case the caller might be trying to clean up. */

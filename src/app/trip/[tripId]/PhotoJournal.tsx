@@ -868,6 +868,93 @@ function Lightbox({
     };
   }, []);
 
+  /**
+   * "Save" — one button that hands the file to the OS's own share sheet
+   * (native Photos / iCloud / Google Photos / Dropbox / etc.) on mobile,
+   * and falls back to a plain download on desktop. Everything hangs off
+   * the /download route, which streams the R2 bytes back same-origin;
+   * that's what lets `navigator.share({ files })` read them as a Blob
+   * without needing CORS on the bucket.
+   */
+  const [saveState, setSaveState] = useState<{ working: boolean; error: string | null }>({
+    working: false,
+    error: null,
+  });
+  const currentPhotoId = photo?.id;
+  const currentCaption = photo?.caption ?? null;
+  const handleSave = useCallback(async () => {
+    if (!currentPhotoId) return;
+    setSaveState({ working: true, error: null });
+    try {
+      const res = await fetch(`/api/trip/${tripId}/photos/${currentPhotoId}/download`);
+      if (!res.ok) {
+        throw new Error(`Couldn't fetch that photo (HTTP ${res.status}).`);
+      }
+      const blob = await res.blob();
+      // Filename comes back on Content-Disposition -- pull the plain
+      // (RFC 2616) filename out of it; we don't need the RFC 5987 form
+      // client-side.
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? "photo.jpg";
+      const file = new File([blob], filename, { type: blob.type || "application/octet-stream" });
+
+      // Prefer the native share sheet where the browser supports sharing
+      // *files* specifically. `navigator.canShare` returns false for text-
+      // only implementations (older Chromium on desktop), which is what we
+      // want -- fall through to a download in that case.
+      const canShare =
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] });
+
+      if (canShare) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: currentCaption ?? "Photo",
+          });
+          setSaveState({ working: false, error: null });
+          return;
+        } catch (err) {
+          // AbortError = user tapped Cancel on the share sheet. That's a
+          // deliberate "no thanks," not a fallback trigger -- offering a
+          // silent download afterwards would feel like the app ignoring
+          // the cancel.
+          if (err instanceof DOMException && err.name === "AbortError") {
+            setSaveState({ working: false, error: null });
+            return;
+          }
+          // Fall through to download on other share failures.
+        }
+      }
+
+      // Desktop / no share: trigger a plain download via a hidden anchor.
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setSaveState({ working: false, error: null });
+    } catch (err) {
+      setSaveState({
+        working: false,
+        error: err instanceof Error ? err.message : "Couldn't save that photo.",
+      });
+    }
+  }, [currentPhotoId, currentCaption, tripId]);
+
+  // Auto-dismiss any save error after 5s -- same posture as the upload
+  // banner. The banner replaces itself on the next attempt regardless.
+  useEffect(() => {
+    if (!saveState.error) return;
+    const timer = setTimeout(() => setSaveState((s) => ({ ...s, error: null })), 5000);
+    return () => clearTimeout(timer);
+  }, [saveState.error]);
+
   if (!photo) return null;
 
   return (
@@ -957,14 +1044,34 @@ function Lightbox({
         </button>
       )}
 
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        className="absolute right-3 top-3 rounded-full bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
-      >
-        ✕
-      </button>
+      <div className="absolute right-3 top-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saveState.working}
+          aria-label="Save or share this photo"
+          className="rounded-full bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60 disabled:opacity-60"
+        >
+          {saveState.working ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="rounded-full bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/60"
+        >
+          ✕
+        </button>
+      </div>
+
+      {saveState.error && (
+        <p
+          role="alert"
+          className="absolute inset-x-0 bottom-4 mx-auto max-w-md rounded-md bg-red-900/90 px-3 py-2 text-center text-sm text-red-100"
+        >
+          {saveState.error}
+        </p>
+      )}
     </div>
   );
 }

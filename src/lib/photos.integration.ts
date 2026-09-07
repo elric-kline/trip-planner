@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   deletePhoto,
+  downloadablePhoto,
   listDayPhotos,
   listItemPhotos,
   listTripLevelPhotos,
@@ -28,18 +29,28 @@ import { eq } from "drizzle-orm";
  * would.
  */
 
-type BucketOp = { op: "put" | "delete" | "url"; key: string };
+type BucketOp = { op: "put" | "get" | "delete" | "url"; key: string };
 
-function memoryBackend(): { backend: StorageBackend; store: Map<string, Uint8Array>; ops: BucketOp[] } {
-  const store = new Map<string, Uint8Array>();
+function memoryBackend(): {
+  backend: StorageBackend;
+  store: Map<string, { bytes: Uint8Array; mimeType: string }>;
+  ops: BucketOp[];
+} {
+  const store = new Map<string, { bytes: Uint8Array; mimeType: string }>();
   const ops: BucketOp[] = [];
   return {
     store,
     ops,
     backend: {
-      async putObject(key, bytes) {
+      async putObject(key, bytes, mimeType) {
         ops.push({ op: "put", key });
-        store.set(key, bytes);
+        store.set(key, { bytes, mimeType });
+      },
+      async getObject(key) {
+        ops.push({ op: "get", key });
+        const entry = store.get(key);
+        if (!entry) throw new Error(`memoryBackend: no object at ${key}`);
+        return entry;
       },
       async deleteObject(key) {
         ops.push({ op: "delete", key });
@@ -362,6 +373,35 @@ test("caption is trimmed on write, and can be cleared with an empty string", asy
   assert.equal(edited.caption, "polished");
   const cleared = await updatePhotoCaption(ctx.plannerAccess, photo.id, "");
   assert.equal(cleared.caption, null);
+});
+
+test("downloadablePhoto returns bytes + a friendly filename, and refuses cross-trip", async (t) => {
+  const ctx = await setup();
+  const { backend } = memoryBackend();
+  installTestBackend(backend);
+  t.after(async () => {
+    resetBackend();
+    await cleanupTrip(ctx.trip.id, []);
+    await cleanupTrip(ctx.otherTrip.id, ctx.userIds);
+  });
+
+  const uploaded = await uploadPhoto(ctx.plannerAccess, {
+    scope: "trip",
+    mimeType: "image/png",
+    bytes: TINY_PNG,
+    capturedAt: new Date("2026-04-20T15:30:00Z"),
+  });
+
+  const download = await downloadablePhoto(ctx.plannerAccess, uploaded.id);
+  assert.ok(download, "downloadable when scoped correctly");
+  assert.deepEqual(Array.from(download!.bytes), Array.from(TINY_PNG), "bytes round-trip through R2");
+  assert.equal(download!.mimeType, "image/png");
+  // filename shape: photo-YYYYMMDD-HHmm.<ext>
+  assert.match(download!.filename, /^photo-20260420-1530\.png$/);
+
+  // Cross-trip guardrail
+  const cross = await downloadablePhoto(ctx.outsiderAccess, uploaded.id);
+  assert.equal(cross, null, "another trip's viewer sees null, not the bytes");
 });
 
 test("an SVG upload is refused (see isAcceptablePhotoType)", async (t) => {

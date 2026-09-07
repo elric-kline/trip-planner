@@ -7,6 +7,7 @@ import { RuleError } from "./items.ts";
 import {
   deleteObject,
   deleteObjects,
+  getObject,
   isStorageConfigured,
   objectKeyFor,
   putObject,
@@ -350,6 +351,77 @@ export async function viewablePhotoUrl(
   if (!row || row.tripId !== access.trip.id) return null;
   const url = await signedGetUrl(row.storageKey);
   return { url, mimeType: row.mimeType };
+}
+
+/**
+ * Common raster mime → filename extension. Not exhaustive by design:
+ * anything the browser reports and we don't have a mapping for gets `.bin`,
+ * which is honest ("we don't know what this is") rather than pretending it's
+ * a jpg. Used only for the download filename hint -- the file's real bytes
+ * are unchanged either way.
+ */
+function extensionFor(mimeType: string): string {
+  const m = mimeType.toLowerCase();
+  if (m === "image/jpeg" || m === "image/jpg") return "jpg";
+  if (m === "image/png") return "png";
+  if (m === "image/webp") return "webp";
+  if (m === "image/heic") return "heic";
+  if (m === "image/heif") return "heif";
+  if (m === "image/gif") return "gif";
+  if (m === "image/avif") return "avif";
+  if (m === "image/bmp") return "bmp";
+  if (m === "image/tiff") return "tiff";
+  return "bin";
+}
+
+/**
+ * Builds a filename that reads well in Finder / Files / the download tray:
+ * `photo-YYYYMMDD-HHmm.<ext>`. Uses `capturedAt` when the uploader supplied
+ * it (EXIF), falling back to `createdAt`. Deliberately no trip name or
+ * caption in the filename -- both can carry punctuation the filesystem or
+ * a share-sheet target dislikes.
+ */
+function filenameFor(mimeType: string, at: Date): string {
+  const iso = at.toISOString(); // "2026-04-20T15:30:00.000Z"
+  const stamp = `${iso.slice(0, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}`;
+  return `photo-${stamp}.${extensionFor(mimeType)}`;
+}
+
+/**
+ * The bytes plus the metadata a download response needs (mime, filename).
+ * Trip-scoped check same as viewablePhotoUrl -- a photo id from another
+ * trip returns null. Buffers the object in memory: photos are already
+ * capped at 15 MB (see uploadPhoto), which is fine for a per-request
+ * proxy.
+ *
+ * Why proxy through the server instead of redirecting to an R2 URL with a
+ * Content-Disposition override: presigned URLs support the override,
+ * custom-domain public URLs don't. Proxying uniformly is what lets the
+ * download button behave the same either way.
+ */
+export async function downloadablePhoto(
+  access: TripAccess,
+  photoId: string,
+): Promise<{ bytes: Uint8Array; mimeType: string; filename: string } | null> {
+  const [row] = await db
+    .select({
+      storageKey: photos.storageKey,
+      mimeType: photos.mimeType,
+      tripId: photos.tripId,
+      capturedAt: photos.capturedAt,
+      createdAt: photos.createdAt,
+    })
+    .from(photos)
+    .where(eq(photos.id, photoId))
+    .limit(1);
+  if (!row || row.tripId !== access.trip.id) return null;
+
+  const { bytes } = await getObject(row.storageKey);
+  return {
+    bytes,
+    mimeType: row.mimeType,
+    filename: filenameFor(row.mimeType, row.capturedAt ?? row.createdAt),
+  };
 }
 
 /**
