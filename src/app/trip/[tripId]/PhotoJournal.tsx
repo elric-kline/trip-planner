@@ -136,6 +136,12 @@ export default function PhotoJournal(props: Props) {
     | { kind: "item"; itemId: string }
   >({ kind: "all" });
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkSave, setBulkSave] = useState<
+    | { kind: "idle" }
+    | { kind: "working"; done: number; total: number; label: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const itemsByDay = useMemo(() => {
@@ -301,6 +307,138 @@ export default function PhotoJournal(props: Props) {
     return () => clearTimeout(timer);
   }, [status]);
 
+  useEffect(() => {
+    if (bulkSave.kind !== "error") return;
+    const timer = setTimeout(() => setBulkSave({ kind: "idle" }), 8_000);
+    return () => clearTimeout(timer);
+  }, [bulkSave]);
+
+  const toggleSelected = useCallback((photoId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(new Set(filteredPhotos.map((p) => p.id)));
+  }, [filteredPhotos]);
+
+  // Prune selections that leave the visible set (a photo the viewer just
+  // deleted, or a filter change that hides one they'd ticked). Without
+  // this the count in the action bar drifts silently away from what the
+  // grid shows.
+  useEffect(() => {
+    const visibleIds = new Set(filteredPhotos.map((p) => p.id));
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visibleIds.has(id)) next.add(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredPhotos]);
+
+  /**
+   * Bulk save: pick the best delivery mode the browser will accept.
+   *
+   *   - Mobile + a browser that reports `canShare({ files })`: fetch each
+   *     photo, hand the array of Files to `navigator.share`. This is what
+   *     lets Photos / Google Photos / iCloud accept them as individual
+   *     images the viewer can then edit or repost, rather than as a zip
+   *     the receiving app has to know how to unpack.
+   *   - Everywhere else (desktop, older Chromium, browsers that only share
+   *     text): hit /photos/download-batch, which streams a store-mode zip
+   *     back with the batch's Content-Disposition set to attachment. The
+   *     browser handles the download natively via a hidden anchor click;
+   *     no client-side buffering.
+   *
+   * A single fetch failure aborts the batch rather than silently skipping
+   * a photo -- a "save 20" that quietly returns 19 is worse than one that
+   * says something broke.
+   */
+  const handleBulkSave = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    // Feature-detect share-with-files. A one-byte placeholder is enough --
+    // canShare only checks the *shape* of what would be shared, not the
+    // real bytes, and building a real File-per-photo just to run this test
+    // would be wasteful when the answer is usually no on desktop.
+    const canShareFiles = (() => {
+      if (typeof navigator === "undefined" || typeof navigator.canShare !== "function") return false;
+      try {
+        const probe = new File([new Uint8Array(1)], "probe.png", { type: "image/png" });
+        return navigator.canShare({ files: [probe] });
+      } catch {
+        return false;
+      }
+    })();
+
+    if (canShareFiles) {
+      setBulkSave({ kind: "working", done: 0, total: ids.length, label: "Preparing" });
+      const files: File[] = [];
+      try {
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          const res = await fetch(`/api/trip/${props.tripId}/photos/${id}/download`);
+          if (!res.ok) throw new Error(`Couldn't fetch photo ${i + 1}/${ids.length} (HTTP ${res.status}).`);
+          const blob = await res.blob();
+          const disposition = res.headers.get("Content-Disposition") ?? "";
+          const match = /filename="([^"]+)"/.exec(disposition);
+          const filename = match?.[1] ?? `photo-${i + 1}.jpg`;
+          files.push(new File([blob], filename, { type: blob.type || "application/octet-stream" }));
+          setBulkSave({ kind: "working", done: i + 1, total: ids.length, label: "Preparing" });
+        }
+      } catch (err) {
+        setBulkSave({
+          kind: "error",
+          message: err instanceof Error ? err.message : "Couldn't fetch those photos.",
+        });
+        return;
+      }
+
+      try {
+        await navigator.share({
+          files,
+          title: `${files.length} photo${files.length === 1 ? "" : "s"}`,
+        });
+        setBulkSave({ kind: "idle" });
+        clearSelection();
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          // User cancelled the share sheet. Don't fall through to a
+          // silent zip download that would feel like the app ignoring
+          // the cancel. Leave the selection intact so they can try again.
+          setBulkSave({ kind: "idle" });
+          return;
+        }
+        // Anything else -- the OS rejected the payload, one of the files
+        // was too big for the target app -- fall through to the zip path
+        // so the viewer still walks away with their photos.
+      }
+    }
+
+    // Zip fallback. Server streams the file; a plain anchor click starts
+    // the download natively (same trick the single-photo path uses on
+    // desktop). No client-side buffering.
+    const anchor = document.createElement("a");
+    anchor.href = `/api/trip/${props.tripId}/photos/download-batch?ids=${encodeURIComponent(ids.join(","))}`;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setBulkSave({ kind: "idle" });
+    // Don't clear the selection on the zip path -- the download runs
+    // async in the browser's own tray; leaving the selection lets a
+    // viewer retry if it fails, and Clear is right there in the bar.
+  }, [selectedIds, props.tripId, clearSelection]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -360,6 +498,8 @@ export default function PhotoJournal(props: Props) {
               tripId={props.tripId}
               photo={photo}
               canDelete={photo.uploadedBy === props.viewerId || props.isPlanner}
+              selected={selectedIds.has(photo.id)}
+              onSelectToggle={() => toggleSelected(photo.id)}
               onOpen={() => setLightboxIndex(index)}
               onDelete={() => handleDelete(photo.id)}
               onEditCaption={() => handleCaptionEdit(photo.id, photo.caption)}
@@ -379,6 +519,17 @@ export default function PhotoJournal(props: Props) {
           onClose={() => setLightboxIndex(null)}
           days={props.days}
           items={props.items}
+        />
+      )}
+
+      {selectedIds.size > 0 && (
+        <SelectionBar
+          count={selectedIds.size}
+          totalVisible={filteredPhotos.length}
+          bulkSave={bulkSave}
+          onSave={handleBulkSave}
+          onSelectAll={selectAllVisible}
+          onClear={clearSelection}
         />
       )}
     </div>
@@ -468,6 +619,8 @@ function PhotoCard({
   tripId,
   photo,
   canDelete,
+  selected,
+  onSelectToggle,
   onOpen,
   onDelete,
   onEditCaption,
@@ -477,6 +630,8 @@ function PhotoCard({
   tripId: string;
   photo: PhotoWire;
   canDelete: boolean;
+  selected: boolean;
+  onSelectToggle: () => void;
   onOpen: () => void;
   onDelete: () => void;
   onEditCaption: () => void;
@@ -496,30 +651,75 @@ function PhotoCard({
   }, [photo, days, items]);
 
   return (
-    <li className="group flex flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
-      {/* A button rather than a plain click handler on the div: keyboard
-          activation (Enter/Space) and screen-reader semantics come for free,
-          which the previous version's non-interactive tile didn't have. */}
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={photo.caption ? `View "${photo.caption}"` : "View photo"}
-        className="relative block aspect-square bg-stone-100 focus:outline-none focus:ring-2 focus:ring-route-500"
-      >
-        {/* next/image would need remoteHost config for the R2 signed URLs the
-            view endpoint redirects to, and we already lazy-load + let R2
-            do CDN duty. A plain <img> is the right primitive here. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`/api/trip/${tripId}/photos/${photo.id}/view`}
-          alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
-          loading="lazy"
-          className="h-full w-full object-cover transition-opacity group-hover:opacity-90"
-        />
-        <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-          {scopeBadge}
-        </span>
-      </button>
+    <li
+      className={
+        selected
+          ? "group flex flex-col overflow-hidden rounded-md border-2 border-route-500 bg-white shadow-sm"
+          : "group flex flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm"
+      }
+    >
+      {/* Wrapper so the selection checkbox can sit on top of the image
+          button without swallowing its clicks. The checkbox has to be a
+          sibling with a higher stacking context, not a child of the
+          button -- a button inside a button is invalid HTML and won't
+          fire correctly on some Android WebViews. */}
+      <div className="relative">
+        {/* A button rather than a plain click handler on the div: keyboard
+            activation (Enter/Space) and screen-reader semantics come for free,
+            which the previous version's non-interactive tile didn't have. */}
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={photo.caption ? `View "${photo.caption}"` : "View photo"}
+          className="relative block aspect-square w-full bg-stone-100 focus:outline-none focus:ring-2 focus:ring-route-500"
+        >
+          {/* next/image would need remoteHost config for the R2 signed URLs the
+              view endpoint redirects to, and we already lazy-load + let R2
+              do CDN duty. A plain <img> is the right primitive here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/trip/${tripId}/photos/${photo.id}/view`}
+            alt={photo.caption ?? `Photo by ${photo.uploaderName ?? photo.uploaderEmail}`}
+            loading="lazy"
+            className={
+              selected
+                ? "h-full w-full object-cover opacity-70"
+                : "h-full w-full object-cover transition-opacity group-hover:opacity-90"
+            }
+          />
+          <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            {scopeBadge}
+          </span>
+        </button>
+
+        {/* Selection checkbox. Big touch target (44x44 hit area via the
+            outer button padding), small visible checkmark. Positioned
+            top-right so it doesn't collide with the scope badge. */}
+        <button
+          type="button"
+          onClick={onSelectToggle}
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={selected ? "Deselect this photo" : "Select this photo"}
+          className={
+            selected
+              ? "absolute right-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-route-500 text-white shadow-md ring-2 ring-white focus:outline-none focus:ring-2 focus:ring-route-500"
+              : "absolute right-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white shadow-sm ring-2 ring-white/60 opacity-70 hover:bg-black/60 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-route-500"
+          }
+        >
+          {selected ? (
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M16.7 5.3a1 1 0 010 1.4l-7.4 7.4a1 1 0 01-1.4 0L3.3 9.5a1 1 0 011.4-1.4l3.6 3.6 6.7-6.7a1 1 0 011.7.3z"
+                clipRule="evenodd"
+              />
+            </svg>
+          ) : (
+            <span aria-hidden="true" className="h-3 w-3 rounded-full border-2 border-white/80" />
+          )}
+        </button>
+      </div>
       <div className="flex flex-1 flex-col gap-1 px-2 py-1.5 text-xs">
         <p className="line-clamp-2 min-h-[2em] text-stone-700">
           {photo.caption ?? <span className="text-stone-400">No caption</span>}
@@ -1071,6 +1271,86 @@ function Lightbox({
         >
           {saveState.error}
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sticky bottom action bar for a non-empty selection. Renders count +
+ * three actions: "Select all" (adds every currently filtered photo),
+ * "Save" (mirrors the single-photo Save button's logic against the full
+ * batch), and "Clear" (drops the selection).
+ *
+ * `bulkSave.kind === "working"` swaps the Save label to a progress
+ * counter ("Preparing 4/12") -- the fetch-per-file phase of the mobile
+ * share path can take a few seconds on a slow connection, and a
+ * silently-frozen button reads as broken. The zip-download path
+ * finishes on the anchor click; that's fast enough not to need a
+ * progress state of its own.
+ */
+function SelectionBar({
+  count,
+  totalVisible,
+  bulkSave,
+  onSave,
+  onSelectAll,
+  onClear,
+}: {
+  count: number;
+  totalVisible: number;
+  bulkSave:
+    | { kind: "idle" }
+    | { kind: "working"; done: number; total: number; label: string }
+    | { kind: "error"; message: string };
+  onSave: () => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  const busy = bulkSave.kind === "working";
+  return (
+    <div
+      // Fixed so the bar rides above the page as the viewer scrolls the
+      // gallery; the standard-looking `pb-safe-*` isn't part of this
+      // project's Tailwind config yet, so a plain bottom offset is fine.
+      className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit max-w-[95vw] flex-wrap items-center gap-3 rounded-full bg-stone-900 px-4 py-2 text-sm text-white shadow-lg"
+      role="region"
+      aria-label="Selected photos"
+    >
+      <span className="whitespace-nowrap font-medium">
+        {busy
+          ? `${bulkSave.label} ${bulkSave.done}/${bulkSave.total}…`
+          : `${count} selected`}
+      </span>
+      {count < totalVisible && !busy && (
+        <button
+          type="button"
+          onClick={onSelectAll}
+          className="whitespace-nowrap text-xs text-stone-300 underline hover:text-white"
+        >
+          Select all {totalVisible}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={busy}
+        className="whitespace-nowrap rounded-full bg-route-500 px-3 py-1 text-xs font-semibold text-white hover:bg-route-600 disabled:opacity-60"
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={busy}
+        className="whitespace-nowrap text-xs text-stone-300 underline hover:text-white disabled:opacity-60"
+      >
+        Clear
+      </button>
+      {bulkSave.kind === "error" && (
+        <span role="alert" className="w-full text-xs text-red-300">
+          {bulkSave.message}
+        </span>
       )}
     </div>
   );
