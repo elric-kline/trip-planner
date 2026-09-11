@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   deletePhoto,
+  downloadableBatch,
   downloadablePhoto,
   listDayPhotos,
   listItemPhotos,
   listTripLevelPhotos,
   listTripPhotos,
+  MAX_BATCH_PHOTOS,
   updatePhotoCaption,
   uploadPhoto,
 } from "./photos.ts";
@@ -402,6 +404,99 @@ test("downloadablePhoto returns bytes + a friendly filename, and refuses cross-t
   // Cross-trip guardrail
   const cross = await downloadablePhoto(ctx.outsiderAccess, uploaded.id);
   assert.equal(cross, null, "another trip's viewer sees null, not the bytes");
+});
+
+test("downloadableBatch: empty ids returns [], and refuses more than the cap", async (t) => {
+  const ctx = await setup();
+  const { backend } = memoryBackend();
+  installTestBackend(backend);
+  t.after(async () => {
+    resetBackend();
+    await cleanupTrip(ctx.trip.id, []);
+    await cleanupTrip(ctx.otherTrip.id, ctx.userIds);
+  });
+
+  assert.deepEqual(await downloadableBatch(ctx.plannerAccess, []), []);
+
+  await assert.rejects(
+    () => downloadableBatch(ctx.plannerAccess, new Array(MAX_BATCH_PHOTOS + 1).fill("x")),
+    /at most 200/,
+  );
+});
+
+test("downloadableBatch drops ids from other trips, dedupes, and orders by capture time", async (t) => {
+  const ctx = await setup();
+  const { backend } = memoryBackend();
+  installTestBackend(backend);
+  t.after(async () => {
+    resetBackend();
+    await cleanupTrip(ctx.trip.id, []);
+    await cleanupTrip(ctx.otherTrip.id, ctx.userIds);
+  });
+
+  const older = await uploadPhoto(ctx.plannerAccess, {
+    scope: "trip",
+    mimeType: "image/png",
+    bytes: TINY_PNG,
+    capturedAt: new Date("2026-04-20T09:00:00Z"),
+  });
+  const newer = await uploadPhoto(ctx.plannerAccess, {
+    scope: "trip",
+    mimeType: "image/jpeg",
+    bytes: TINY_PNG,
+    capturedAt: new Date("2026-04-20T18:00:00Z"),
+  });
+  const foreign = await uploadPhoto(ctx.outsiderAccess, {
+    scope: "trip",
+    mimeType: "image/png",
+    bytes: TINY_PNG,
+  });
+
+  // Ask in the wrong order + duplicate + foreign id
+  const entries = await downloadableBatch(ctx.plannerAccess, [
+    newer.id,
+    older.id,
+    older.id,
+    foreign.id,
+  ]);
+
+  assert.deepEqual(
+    entries.map((e) => e.id),
+    [older.id, newer.id],
+    "capture time ascending, foreign id dropped, dupes collapsed",
+  );
+  // Filename extensions match each row's own mime, not the batch's first one
+  assert.match(entries[0].filename, /\.png$/);
+  assert.match(entries[1].filename, /\.jpg$/);
+});
+
+test("downloadableBatch disambiguates filenames for photos captured in the same minute", async (t) => {
+  const ctx = await setup();
+  const { backend } = memoryBackend();
+  installTestBackend(backend);
+  t.after(async () => {
+    resetBackend();
+    await cleanupTrip(ctx.trip.id, []);
+    await cleanupTrip(ctx.otherTrip.id, ctx.userIds);
+  });
+
+  const sameMinute = new Date("2026-04-20T09:00:00Z");
+  const a = await uploadPhoto(ctx.plannerAccess, {
+    scope: "trip",
+    mimeType: "image/png",
+    bytes: TINY_PNG,
+    capturedAt: sameMinute,
+  });
+  const b = await uploadPhoto(ctx.plannerAccess, {
+    scope: "trip",
+    mimeType: "image/png",
+    bytes: TINY_PNG,
+    capturedAt: sameMinute,
+  });
+
+  const entries = await downloadableBatch(ctx.plannerAccess, [a.id, b.id]);
+  const names = new Set(entries.map((e) => e.filename));
+  assert.equal(names.size, 2, "two same-minute photos get two distinct filenames");
 });
 
 test("an SVG upload is refused (see isAcceptablePhotoType)", async (t) => {

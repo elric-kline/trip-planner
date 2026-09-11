@@ -425,6 +425,87 @@ export async function downloadablePhoto(
 }
 
 /**
+ * The metadata a bulk-download route needs to stream a zip. Same trip-scope
+ * check as downloadablePhoto -- any id that isn't on this trip is silently
+ * dropped rather than refused, so a single stale id doesn't blow up the
+ * whole batch. Deliberately does NOT read bytes here: the zip writer wants
+ * them one at a time as it streams, and holding the whole batch in memory
+ * would defeat the streaming zip's own reason for existing.
+ *
+ * Ordered by capture time (then creation), matching listTripPhotos so a zip
+ * feels like the same journal the viewer just filtered. Duplicate ids in
+ * the input are deduped -- a viewer can't accidentally re-add the same
+ * photo four times by rapid tapping.
+ */
+export type BatchEntry = {
+  id: string;
+  storageKey: string;
+  mimeType: string;
+  filename: string;
+};
+
+/** Hard cap on batch size -- big enough for any realistic "give me my day's photos" and small enough to bound the R2 read cost. */
+export const MAX_BATCH_PHOTOS = 200;
+
+export async function downloadableBatch(
+  access: TripAccess,
+  photoIds: string[],
+): Promise<BatchEntry[]> {
+  if (photoIds.length === 0) return [];
+  if (photoIds.length > MAX_BATCH_PHOTOS) {
+    throw new RuleError(`That's a lot -- pick at most ${MAX_BATCH_PHOTOS} photos at a time.`);
+  }
+
+  const uniqueIds = [...new Set(photoIds)];
+  const rows = await db
+    .select({
+      id: photos.id,
+      tripId: photos.tripId,
+      storageKey: photos.storageKey,
+      mimeType: photos.mimeType,
+      capturedAt: photos.capturedAt,
+      createdAt: photos.createdAt,
+    })
+    .from(photos)
+    .where(and(eq(photos.tripId, access.trip.id), inArray(photos.id, uniqueIds)));
+
+  // A collision-avoidance suffix: two photos taken in the same minute would
+  // otherwise get the same filenameFor() output and clobber each other in
+  // the zip. Adding the row id's first eight characters is enough.
+  const usedNames = new Set<string>();
+  const disambiguate = (name: string, id: string): string => {
+    if (!usedNames.has(name)) {
+      usedNames.add(name);
+      return name;
+    }
+    const dot = name.lastIndexOf(".");
+    const stem = dot === -1 ? name : name.slice(0, dot);
+    const ext = dot === -1 ? "" : name.slice(dot);
+    const suffixed = `${stem}-${id.slice(0, 8)}${ext}`;
+    usedNames.add(suffixed);
+    return suffixed;
+  };
+
+  const sorted = rows
+    .slice()
+    .sort((a, b) => {
+      const at = (a.capturedAt ?? a.createdAt).getTime();
+      const bt = (b.capturedAt ?? b.createdAt).getTime();
+      return at - bt;
+    });
+
+  return sorted.map((row) => ({
+    id: row.id,
+    storageKey: row.storageKey,
+    mimeType: row.mimeType,
+    filename: disambiguate(
+      filenameFor(row.mimeType, row.capturedAt ?? row.createdAt),
+      row.id,
+    ),
+  }));
+}
+
+/**
  * A batched R2 sweep: given a trip that's about to be deleted (or a set of
  * ids the app has already dropped from the DB), clean up their objects.
  * The DB is the authority on whether a photo exists -- see deletePhoto's
