@@ -56,10 +56,96 @@ const RESIZE_QUALITY = 0.85;
 /** Same cap the server enforces (see lib/photos.ts). Client-side check up-front is a fast fail, not the security boundary. */
 const MAX_POST_RESIZE_BYTES = 15 * 1024 * 1024;
 
-type UploadStatus =
-  | { kind: "idle" }
-  | { kind: "working"; done: number; total: number }
-  | { kind: "error"; message: string };
+/**
+ * Per-file upload state. Kept as a real job list (rather than a
+ * counter + a generic error banner) so a batch that partially fails
+ * doesn't disappear from view: every file the viewer picked stays on
+ * screen with its own status, and a failed one comes with a Retry
+ * button beside it.
+ *
+ * The whole thing exists because mobile browsers pause JS and drop
+ * in-flight fetches when a phone idles or the tab backgrounds -- an
+ * older UI that only tracked "done/total" would let those cancelled
+ * uploads vanish silently. Now the failure is a row the viewer can
+ * still see and act on when they come back to the tab.
+ */
+type UploadJobStatus = "queued" | "resizing" | "uploading" | "succeeded" | "failed";
+
+type UploadJob = {
+  id: string;
+  file: File;
+  filename: string;
+  status: UploadJobStatus;
+  error: string | null;
+  attempts: number;
+};
+
+type UploadBatch = {
+  jobs: UploadJob[];
+  scope: Scope;
+  dayId: string | null;
+  itemId: string | null;
+  caption: string;
+  /** True while a processing loop is currently walking the queue. */
+  running: boolean;
+};
+
+/** How many times we'll re-send an individual photo before giving up on it. */
+const UPLOAD_MAX_ATTEMPTS = 3;
+
+/**
+ * Which HTTP responses are worth retrying. 4xx is what the server means
+ * to say ("too big," "bad mime"), so retrying is guaranteed to fail
+ * again; 5xx and network errors are the transient side and are exactly
+ * what a phone-idled fetch abort surfaces as.
+ */
+function isRetriable(err: unknown, status: number | undefined): boolean {
+  if (status !== undefined) return status >= 500;
+  // A thrown error (network failure, AbortError from the browser tearing
+  // down the fetch on tab backgrounding, TypeError from "load failed")
+  // is always worth one more try.
+  return err instanceof Error;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Minimal wrapper around the Screen Wake Lock API. On phones that
+ * support it (all modern iOS Safari + Android Chrome), holding a
+ * "screen" wake lock while uploads run keeps the display awake, which
+ * in turn keeps the tab from being throttled/suspended by the OS --
+ * that suspension is what was silently killing in-flight uploads.
+ *
+ * The lock is released automatically when the tab loses visibility.
+ * The batch runner re-acquires it on the next `visibilitychange` that
+ * makes us visible again -- see the effect in PhotoJournal.
+ *
+ * Everything here quietly returns null when unsupported or refused;
+ * uploads still work without a wake lock, they're just more likely to
+ * fail on a phone that's been left to idle.
+ */
+type WakeLockSentinelLike = {
+  release(): Promise<void> | void;
+  addEventListener?: (event: string, listener: () => void) => void;
+};
+type WakeLockCapableNavigator = Navigator & {
+  wakeLock?: { request(kind: "screen"): Promise<WakeLockSentinelLike> };
+};
+
+async function acquireWakeLock(): Promise<WakeLockSentinelLike | null> {
+  if (typeof navigator === "undefined") return null;
+  const nav = navigator as WakeLockCapableNavigator;
+  if (!nav.wakeLock) return null;
+  try {
+    return await nav.wakeLock.request("screen");
+  } catch {
+    // Most common reason: document isn't fully active / doesn't have
+    // focus. Not fatal -- upload just runs without the assist.
+    return null;
+  }
+}
 
 /**
  * Canvas-based resize. `image/webp` is quietly ~30% smaller than JPEG at
@@ -123,7 +209,8 @@ type Scope = "trip" | "day" | "item";
 
 export default function PhotoJournal(props: Props) {
   const [photos, setPhotos] = useState<PhotoWire[]>(props.initialPhotos);
-  const [status, setStatus] = useState<UploadStatus>({ kind: "idle" });
+  const [batch, setBatch] = useState<UploadBatch | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [scope, setScope] = useState<Scope>("trip");
   const [selectedDayId, setSelectedDayId] = useState<string>(props.days[0]?.id ?? "");
@@ -172,22 +259,151 @@ export default function PhotoJournal(props: Props) {
 
   const openPicker = useCallback(() => {
     if (!props.storageConfigured) {
-      setStatus({
-        kind: "error",
-        message:
-          "Photo storage isn't configured yet. Ask whoever runs this app to set the R2 environment variables.",
-      });
+      setUploadError(
+        "Photo storage isn't configured yet. Ask whoever runs this app to set the R2 environment variables.",
+      );
       return;
     }
     setPickerOpen(true);
   }, [props.storageConfigured]);
 
+  const updateJob = useCallback(
+    (jobId: string, patch: Partial<UploadJob>) => {
+      setBatch((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          jobs: prev.jobs.map((j) => (j.id === jobId ? { ...j, ...patch } : j)),
+        };
+      });
+    },
+    [],
+  );
+
+  /**
+   * Uploads one file, with retry-and-backoff on transient failures.
+   * Transient = network error or 5xx; a 4xx is what the server tells us
+   * is permanently wrong (too big, bad mime), so we return that failure
+   * immediately without wasting time re-sending. The resize step runs
+   * once regardless -- if the browser can't decode the file at all we
+   * can't fix it by asking again.
+   */
+  const runJob = useCallback(
+    async (job: UploadJob, batchSnapshot: UploadBatch): Promise<PhotoWire | null> => {
+      updateJob(job.id, { status: "resizing", error: null });
+      let blob: Blob;
+      let mimeType: string;
+      try {
+        const resized = await resizeImage(job.file);
+        blob = resized.blob;
+        mimeType = resized.mimeType;
+        if (blob.size > MAX_POST_RESIZE_BYTES) {
+          throw new Error(
+            `That photo is still too large after resize (${Math.round(blob.size / 1024 / 1024)} MB).`,
+          );
+        }
+      } catch (err) {
+        updateJob(job.id, {
+          status: "failed",
+          error: err instanceof Error ? err.message : "Couldn't prepare that photo.",
+        });
+        return null;
+      }
+
+      updateJob(job.id, { status: "uploading" });
+
+      for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+        updateJob(job.id, { attempts: attempt });
+        try {
+          const form = new FormData();
+          form.append("scope", batchSnapshot.scope);
+          if (batchSnapshot.dayId) form.append("dayId", batchSnapshot.dayId);
+          if (batchSnapshot.itemId) form.append("itemId", batchSnapshot.itemId);
+          if (batchSnapshot.caption) form.append("caption", batchSnapshot.caption);
+          form.append("file", new File([blob], job.filename, { type: mimeType }));
+
+          const res = await fetch(`/api/trip/${props.tripId}/photos`, {
+            method: "POST",
+            body: form,
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { photo: PhotoWire };
+            updateJob(job.id, { status: "succeeded", error: null });
+            return data.photo;
+          }
+
+          const errData = await res.json().catch(() => null);
+          const message = errData?.error ?? `Upload failed (HTTP ${res.status}).`;
+          if (!isRetriable(null, res.status) || attempt === UPLOAD_MAX_ATTEMPTS) {
+            updateJob(job.id, { status: "failed", error: message });
+            return null;
+          }
+          // Retry with backoff on 5xx.
+          await sleep(2000 * 2 ** (attempt - 1));
+        } catch (err) {
+          // Fetch itself threw -- network drop, tab thrown into the
+          // background mid-request, DNS glitch on cell data. That's the
+          // exact case retry exists for.
+          const message = err instanceof Error ? err.message : "Upload failed.";
+          if (!isRetriable(err, undefined) || attempt === UPLOAD_MAX_ATTEMPTS) {
+            updateJob(job.id, { status: "failed", error: message });
+            return null;
+          }
+          await sleep(2000 * 2 ** (attempt - 1));
+        }
+      }
+
+      return null;
+    },
+    [props.tripId, updateJob],
+  );
+
+  /**
+   * Walks the batch, running the given job ids one by one. Wake lock is
+   * held for the whole walk so the OS keeps the tab awake while the
+   * viewer's phone screen might otherwise sleep. Sequential rather than
+   * parallel: mobile bandwidth is the bottleneck, not CPU, and going
+   * one-at-a-time keeps individual failures cleanly attributed.
+   */
+  const processQueue = useCallback(
+    async (jobIds: string[], batchSnapshot: UploadBatch) => {
+      const wakeLock = await acquireWakeLock();
+      try {
+        for (const jobId of jobIds) {
+          // Fresh view of the job in state -- the viewer could have
+          // dismissed the batch mid-run, in which case we bail.
+          let jobNow: UploadJob | undefined;
+          setBatch((prev) => {
+            if (!prev) return prev;
+            jobNow = prev.jobs.find((j) => j.id === jobId);
+            return prev;
+          });
+          if (!jobNow) continue;
+          if (jobNow.status === "succeeded") continue;
+
+          const photo = await runJob(jobNow, batchSnapshot);
+          if (photo) {
+            // Newest first, matching the server ordering.
+            setPhotos((prev) => [photo, ...prev]);
+          }
+        }
+      } finally {
+        setBatch((prev) => (prev ? { ...prev, running: false } : prev));
+        try {
+          await wakeLock?.release();
+        } catch {
+          // Wake lock release failing is harmless -- the OS drops it
+          // when we navigate away anyway.
+        }
+      }
+    },
+    [runJob],
+  );
+
   const upload = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files);
       if (list.length === 0) return;
-
-      setStatus({ kind: "working", done: 0, total: list.length });
 
       const scopeToSend: Scope = scope;
       const dayIdToSend = scopeToSend === "day" ? selectedDayId : "";
@@ -195,60 +411,67 @@ export default function PhotoJournal(props: Props) {
       const captionToSend = caption.trim();
 
       if (scopeToSend === "day" && !dayIdToSend) {
-        setStatus({ kind: "error", message: "Pick which day the photo is for." });
+        setUploadError("Pick which day the photo is for.");
         return;
       }
       if (scopeToSend === "item" && !itemIdToSend) {
-        setStatus({ kind: "error", message: "Pick which item the photo is for." });
+        setUploadError("Pick which item the photo is for.");
         return;
       }
+      setUploadError(null);
 
-      const uploaded: PhotoWire[] = [];
-      for (let index = 0; index < list.length; index++) {
-        const raw = list[index];
-        try {
-          const { blob, mimeType } = await resizeImage(raw);
-          if (blob.size > MAX_POST_RESIZE_BYTES) {
-            throw new Error(`That photo is still too large after resize (${Math.round(blob.size / 1024 / 1024)} MB).`);
-          }
-          const form = new FormData();
-          form.append("scope", scopeToSend);
-          if (dayIdToSend) form.append("dayId", dayIdToSend);
-          if (itemIdToSend) form.append("itemId", itemIdToSend);
-          if (captionToSend) form.append("caption", captionToSend);
-          // Preserve the original filename for the server-side extension if it needs one.
-          const filename = raw.name || "photo";
-          form.append("file", new File([blob], filename, { type: mimeType }));
+      const jobs: UploadJob[] = list.map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        filename: file.name || "photo",
+        status: "queued",
+        error: null,
+        attempts: 0,
+      }));
 
-          const res = await fetch(`/api/trip/${props.tripId}/photos`, {
-            method: "POST",
-            body: form,
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            throw new Error(data?.error ?? `Upload failed (HTTP ${res.status}).`);
-          }
-          const data = (await res.json()) as { photo: PhotoWire };
-          uploaded.push(data.photo);
-          setStatus({ kind: "working", done: index + 1, total: list.length });
-        } catch (err) {
-          setStatus({
-            kind: "error",
-            message: err instanceof Error ? err.message : "Upload failed.",
-          });
-          break;
-        }
-      }
+      const snapshot: UploadBatch = {
+        jobs,
+        scope: scopeToSend,
+        dayId: dayIdToSend || null,
+        itemId: itemIdToSend || null,
+        caption: captionToSend,
+        running: true,
+      };
+      setBatch(snapshot);
+      // The picker's own state is stale the moment upload starts.
+      setCaption("");
+      setPickerOpen(false);
 
-      if (uploaded.length > 0) {
-        // Newest first, matching the server ordering.
-        setPhotos((prev) => [...uploaded.reverse(), ...prev]);
-        setCaption("");
-        setPickerOpen(false);
-      }
-      setStatus((s) => (s.kind === "error" ? s : { kind: "idle" }));
+      await processQueue(jobs.map((j) => j.id), snapshot);
     },
-    [caption, props.tripId, scope, selectedDayId, selectedItemId],
+    [caption, processQueue, scope, selectedDayId, selectedItemId],
+  );
+
+  /**
+   * "Retry" for the individual failed rows in the upload panel, and
+   * for "Retry all" from the batch summary. Re-uses the batch's
+   * original scope/dayId/itemId/caption -- the viewer's picker state
+   * may well have moved on by now, but a retry means "try this same
+   * thing again," not "upload with the currently-selected settings."
+   */
+  const retryJobs = useCallback(
+    async (jobIds: string[]) => {
+      if (jobIds.length === 0) return;
+      const current = batch;
+      if (!current) return;
+      setBatch((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          running: true,
+          jobs: prev.jobs.map((j) =>
+            jobIds.includes(j.id) ? { ...j, status: "queued", error: null } : j,
+          ),
+        };
+      });
+      await processQueue(jobIds, current);
+    },
+    [batch, processQueue],
   );
 
   const onFileChange = useCallback(
@@ -270,7 +493,7 @@ export default function PhotoJournal(props: Props) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setStatus({ kind: "error", message: data?.error ?? "Couldn't delete that photo." });
+        setUploadError(data?.error ?? "Couldn't delete that photo.");
         return;
       }
       setPhotos((prev) => prev.filter((p) => p.id !== photoId));
@@ -289,7 +512,7 @@ export default function PhotoJournal(props: Props) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        setStatus({ kind: "error", message: data?.error ?? "Couldn't save that caption." });
+        setUploadError(data?.error ?? "Couldn't save that caption.");
         return;
       }
       const data = (await res.json()) as { photo: { id: string; caption: string | null } };
@@ -298,14 +521,50 @@ export default function PhotoJournal(props: Props) {
     [props.tripId],
   );
 
-  // A dismiss handler for the error banner -- it's persistent by design (an
-  // upload that failed silently is the exact bug this replaces), but the
-  // viewer needs a way to acknowledge and try again.
+  // A dismiss handler for the error banner. Persistent by design so an
+  // error can't slip past, but a viewer who's read it deserves a fresh
+  // page again.
   useEffect(() => {
-    if (status.kind !== "error") return;
-    const timer = setTimeout(() => setStatus({ kind: "idle" }), 10_000);
+    if (!uploadError) return;
+    const timer = setTimeout(() => setUploadError(null), 10_000);
     return () => clearTimeout(timer);
-  }, [status]);
+  }, [uploadError]);
+
+  /**
+   * Wake-lock lifecycle across visibility changes. When the tab is
+   * backgrounded, the OS drops the wake lock automatically -- there's
+   * no way to prevent that. What we CAN do is re-request it the moment
+   * the viewer comes back to the tab, so the upload's remaining work
+   * still runs on a screen that stays on. Without this the "hey come
+   * back" flow re-strands mid-batch as soon as the viewer looks away
+   * again.
+   */
+  useEffect(() => {
+    if (!batch?.running) return;
+    let currentLock: WakeLockSentinelLike | null = null;
+    let active = true;
+
+    const onVisibility = async () => {
+      if (!active) return;
+      if (document.visibilityState === "visible" && batch?.running) {
+        try {
+          await currentLock?.release();
+        } catch {
+          // ignore
+        }
+        currentLock = await acquireWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisibility);
+      // release() can be sync (void) or async (Promise<void>) depending
+      // on the platform; wrap to swallow both possibilities uniformly.
+      void Promise.resolve(currentLock?.release()).catch(() => {});
+    };
+  }, [batch?.running]);
 
   useEffect(() => {
     if (bulkSave.kind !== "error") return;
@@ -454,16 +713,24 @@ export default function PhotoJournal(props: Props) {
           type="button"
           onClick={openPicker}
           className="btn-primary"
-          disabled={status.kind === "working"}
+          disabled={batch?.running ?? false}
         >
-          {status.kind === "working"
-            ? `Uploading ${status.done + 1}/${status.total}…`
+          {batch?.running
+            ? `Uploading ${batch.jobs.filter((j) => j.status === "succeeded").length}/${batch.jobs.length}…`
             : "Add photos"}
         </button>
       </div>
 
-      {status.kind === "error" && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{status.message}</p>
+      {uploadError && (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{uploadError}</p>
+      )}
+
+      {batch && (
+        <UploadPanel
+          batch={batch}
+          onRetry={(ids) => void retryJobs(ids)}
+          onDismiss={() => setBatch(null)}
+        />
       )}
 
       {pickerOpen && (
@@ -1274,6 +1541,129 @@ function Lightbox({
       )}
     </div>
   );
+}
+
+/**
+ * The upload progress panel. Every file the viewer picked shows up as a
+ * row with its own status, so a batch that partially fails stays visible
+ * -- the older "N/M" counter used to make failed uploads vanish (see
+ * the phone-idles-mid-upload bug this replaces).
+ *
+ * While the batch is running: shows the succeeded/total summary and any
+ * failures accumulated so far, with per-row retry buttons and a
+ * "Retry failed" convenience when there's more than one.
+ *
+ * Once the batch finishes: if everything succeeded, we quietly
+ * self-dismiss after a beat; if some failed, the panel stays put with
+ * retry affordances so the viewer can act on them at their own pace.
+ */
+function UploadPanel({
+  batch,
+  onRetry,
+  onDismiss,
+}: {
+  batch: UploadBatch;
+  onRetry: (jobIds: string[]) => void;
+  onDismiss: () => void;
+}) {
+  const succeeded = batch.jobs.filter((j) => j.status === "succeeded").length;
+  const failed = batch.jobs.filter((j) => j.status === "failed");
+  const total = batch.jobs.length;
+
+  useEffect(() => {
+    if (batch.running) return;
+    if (failed.length > 0) return;
+    // All-good, no work left: auto-dismiss after a beat so the panel
+    // doesn't linger. A viewer who wants to keep it up can just leave
+    // the tab -- state's not persisted anywhere anyway.
+    const timer = setTimeout(onDismiss, 3_000);
+    return () => clearTimeout(timer);
+  }, [batch.running, failed.length, onDismiss]);
+
+  return (
+    <div className="rounded-md border border-stone-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-stone-100 px-3 py-2">
+        <p className="text-sm font-medium text-stone-800">
+          {batch.running
+            ? `Uploading ${succeeded}/${total}…`
+            : failed.length > 0
+              ? `${succeeded}/${total} uploaded · ${failed.length} failed`
+              : `${total} uploaded`}
+        </p>
+        <div className="flex items-center gap-2">
+          {failed.length > 1 && !batch.running && (
+            <button
+              type="button"
+              onClick={() => onRetry(failed.map((j) => j.id))}
+              className="text-xs font-semibold text-route-700 underline hover:text-route-800"
+            >
+              Retry {failed.length}
+            </button>
+          )}
+          {!batch.running && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              aria-label="Dismiss upload panel"
+              className="text-xs text-stone-500 underline hover:text-stone-700"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      </div>
+
+      {batch.running && (
+        <p className="border-b border-stone-100 bg-stone-50 px-3 py-1.5 text-xs text-stone-500">
+          Keep this tab open while uploading — the phone can pause the app
+          if it goes to sleep. We&apos;re holding the screen awake while
+          this runs.
+        </p>
+      )}
+
+      <ul className="max-h-60 divide-y divide-stone-100 overflow-y-auto text-sm">
+        {batch.jobs.map((job) => (
+          <li key={job.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-stone-700" title={job.filename}>
+              {job.filename}
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs">
+              <UploadStatusPill job={job} />
+              {job.status === "failed" && !batch.running && (
+                <button
+                  type="button"
+                  onClick={() => onRetry([job.id])}
+                  className="font-semibold text-route-700 underline hover:text-route-800"
+                >
+                  Retry
+                </button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function UploadStatusPill({ job }: { job: UploadJob }) {
+  if (job.status === "succeeded") {
+    return <span className="text-emerald-700">Uploaded</span>;
+  }
+  if (job.status === "failed") {
+    return (
+      <span className="text-red-700" title={job.error ?? undefined}>
+        Failed{job.attempts > 1 ? ` (${job.attempts} tries)` : ""}
+      </span>
+    );
+  }
+  if (job.status === "uploading") {
+    return <span className="text-stone-500">Uploading…</span>;
+  }
+  if (job.status === "resizing") {
+    return <span className="text-stone-500">Preparing…</span>;
+  }
+  return <span className="text-stone-400">Queued</span>;
 }
 
 /**
